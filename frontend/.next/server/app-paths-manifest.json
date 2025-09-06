@@ -1,8 +1,0 @@
-{
-  "/analysis/page": "app/analysis/page.js",
-  "/upload/page": "app/upload/page.js",
-  "/report/page": "app/report/page.js",
-  "/signin/page": "app/signin/page.js",
-  "/history/page": "app/history/page.js",
-  "/page": "app/page.js"
-}

@@ -10,7 +10,6 @@ export function UserProvider({ children }) {
   const [analysisHistory, setAnalysisHistory] = useState([])
 
   useEffect(() => {
-    // Load user data from localStorage on mount
     loadUserData()
   }, [])
 
@@ -38,13 +37,12 @@ export function UserProvider({ children }) {
       ...userData,
       id: userData.id || `user_${Date.now()}`,
       signInTime: new Date().toISOString(),
-      accountType: userData.accountType || 'trial' // 'trial' or 'premium'
+      accountType: userData.accountType || 'trial'
     }
     
     setUser(userWithId)
     localStorage.setItem('skinai_user', JSON.stringify(userWithId))
     
-    // Initialize empty analysis history for new user
     if (!localStorage.getItem('skinai_analysis_history')) {
       localStorage.setItem('skinai_analysis_history', JSON.stringify([]))
     }

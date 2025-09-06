@@ -10,7 +10,7 @@ export default function UploadPage() {
   const [analyzing, setAnalyzing] = useState(false)
   const { user, addAnalysis, isTrialUser, isTrialExpired } = useUser()
   const router = useRouter()
-
+  
   // If trial expired (only for logged-in users)
   if (user && isTrialExpired) {
     return (

@@ -1,1 +1,11 @@
+# Node modules
 node_modules
+
+# Next.js build output
+/frontend/.next/
+
+# Frontend package lock
+/frontend/package-lock.json
+
+# Python virtual environment
+/backend/venv/
