@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="SkinAI API",
-    description="AI-powered skin analysis and recommendation system",
-    version="1.0.0",
+    description="AI-powered skin analysis and recommendation system with Gemini AI",
+    version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -94,6 +94,22 @@ class ErrorResponse(BaseModel):
     error: str
     details: Optional[str] = None
 
+# 🆕 GEMINI PYDANTIC MODELS
+class GeminiRequest(BaseModel):
+    skinAnalysis: Dict[str, Any]
+    prompt: Optional[str] = None
+    language: str = "th"
+
+class CustomGeminiRequest(BaseModel):
+    analysisId: str
+    customPrompt: str
+    language: str = "th"
+
+class ChatRequest(BaseModel):
+    message: str
+    context: Optional[Dict[str, Any]] = None
+    language: str = "th"
+
 # ✅ UTILITY FUNCTIONS
 def generate_analysis_id() -> str:
     """Generate unique analysis ID"""
@@ -127,14 +143,14 @@ def run_subprocess(command: List[str], input_data: str = None) -> Dict[str, Any]
                 input=input_data,
                 capture_output=True,
                 text=True,
-                timeout=60
+                timeout=120  # Increased timeout for Gemini
             )
         else:
             result = subprocess.run(
                 command,
                 capture_output=True,
                 text=True,
-                timeout=60
+                timeout=120
             )
         
         if result.returncode != 0:
@@ -181,10 +197,11 @@ async def options_handler(full_path: str):
 async def root():
     """Root endpoint"""
     return {
-        "message": "SkinAI Backend API",
-        "version": "1.0.0",
+        "message": "SkinAI Backend API with Gemini AI",
+        "version": "2.0.0",
         "docs": "/docs",
-        "health": "/api/health"
+        "health": "/api/health",
+        "gemini": "/api/gemini/status"
     }
 
 @app.get("/api/health", response_model=HealthResponse)
@@ -208,7 +225,7 @@ async def health_check():
         status="healthy",
         timestamp=datetime.now().isoformat(),
         services=services,
-        version="1.0.0"
+        version="2.0.0"
     )
 
 @app.post("/api/upload", response_model=AnalysisResponse)
@@ -226,8 +243,10 @@ async def upload_and_analyze(file: UploadFile = File(...)):
         )
     
     # Check file size (10MB limit)
-    if file.size and file.size > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File size too large. Maximum 10MB allowed")
+    contents = await file.read()
+    if len(contents) > 10 * 1024 * 1024:
+      raise HTTPException(status_code=400, detail="File size too large. Maximum 10MB allowed")
+    await file.seek(0)
     
     analysis_id = generate_analysis_id()
     file_extension = get_file_extension(file.filename)
@@ -255,7 +274,7 @@ async def upload_and_analyze(file: UploadFile = File(...)):
             opencv_result = run_subprocess([
                 "python", str(opencv_script), str(original_path)
             ])
-            
+            print(opencv_result)
             if opencv_result.get("faceDetected"):
                 response_data["faceDetection"] = {
                     "detected": True,
@@ -383,7 +402,7 @@ async def upload_and_analyze(file: UploadFile = File(...)):
 
 @app.get("/api/analysis/{analysis_id}")
 async def get_analysis(analysis_id: str):
-    """Get analysis result by ID"""
+    """Get analysis result by ID (Enhanced with custom recommendations)"""
     analysis_file = UPLOAD_DIR / f"{analysis_id}_analysis.json"
     
     if not analysis_file.exists():
@@ -392,7 +411,14 @@ async def get_analysis(analysis_id: str):
     try:
         async with aiofiles.open(analysis_file, 'r') as f:
             content = await f.read()
-            return json.loads(content)
+            analysis_data = json.loads(content)
+            
+        # Ensure all required fields exist
+        if "success" not in analysis_data:
+            analysis_data["success"] = True
+            
+        return analysis_data
+        
     except Exception as e:
         logger.error(f"Failed to load analysis {analysis_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to load analysis")
@@ -417,7 +443,8 @@ async def get_history():
                         "acneSeverity": analysis.get("skinAnalysis", {}).get("acneSeverity"),
                         "faceDetected": analysis.get("faceDetection", {}).get("detected", False),
                         "originalImage": analysis.get("originalImage"),
-                        "croppedImage": analysis.get("croppedImage")
+                        "croppedImage": analysis.get("croppedImage"),
+                        "geminiSuccess": analysis.get("geminiSuccess", False)
                     })
             except Exception as e:
                 logger.warning(f"Failed to load analysis file {analysis_file}: {e}")
@@ -525,82 +552,344 @@ async def regenerate_recommendations(analysis_id: str):
         logger.error(f"Failed to regenerate recommendations for {analysis_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to regenerate recommendations")
 
-# ✅ TEST ENDPOINTS
-@app.post("/api/test/opencv")
-async def test_opencv(file: UploadFile = File(...)):
-    """Test OpenCV processor"""
-    if not is_valid_image(file.filename):
-        raise HTTPException(status_code=400, detail="Invalid image file")
+# 🆕 GEMINI API ENDPOINTS
+@app.get("/api/gemini/status")
+async def get_gemini_status():
+    """Check Gemini AI availability"""
+    gemini_script = AI_MODELS_DIR / "gemini_recommender.py"
     
-    # Save temporary file
-    temp_filename = f"test_opencv_{int(datetime.now().timestamp())}{get_file_extension(file.filename)}"
-    temp_path = UPLOAD_DIR / temp_filename
+    if not gemini_script.exists():
+        return {
+            "available": False,
+            "error": "Gemini recommender script not found",
+            "message": "Gemini AI is not available"
+        }
+    
+    # Test Gemini with simple data
+    try:
+        test_data = {
+            "skinType": "Normal",
+            "acneSeverity": "Mild",
+            "confidence": 85,
+            "requestType": "status_check"
+        }
+        
+        result = run_subprocess([
+            "python", str(gemini_script), json.dumps(test_data)
+        ])
+        
+        if result.get("success"):
+            return {
+                "available": True,
+                "message": "Gemini AI is ready",
+                "version": "1.0.0",
+                "model": result.get("model", "gemini-pro")
+            }
+        else:
+            return {
+                "available": False,
+                "error": result.get("error", "Gemini test failed"),
+                "message": "Gemini AI is not responding properly"
+            }
+            
+    except Exception as e:
+        logger.error(f"Gemini status check failed: {e}")
+        return {
+            "available": False,
+            "error": str(e),
+            "message": "Failed to check Gemini status"
+        }
+
+@app.post("/api/gemini/recommendations")
+async def get_gemini_recommendations(request: GeminiRequest):
+    """Get recommendations directly from Gemini AI"""
+    gemini_script = AI_MODELS_DIR / "gemini_recommender.py"
+    
+    if not gemini_script.exists():
+        raise HTTPException(status_code=503, detail="Gemini recommender not available")
     
     try:
-        await save_upload_file(file, temp_path)
+        # Prepare data for Gemini
+        gemini_data = request.skinAnalysis.copy()
         
-        opencv_script = AI_MODELS_DIR / "opencv_processor.py"
-        if not opencv_script.exists():
-            raise HTTPException(status_code=503, detail="OpenCV processor not available")
+        # Add custom prompt if provided
+        if request.prompt:
+            gemini_data["customPrompt"] = request.prompt
         
-        result = run_subprocess(["python", str(opencv_script), str(temp_path)])
+        # Add language preference
+        gemini_data["language"] = request.language
+        gemini_data["requestType"] = "recommendations"
+        
+        # Call Gemini script
+        analysis_json = json.dumps(gemini_data)
+        result = run_subprocess([
+            "python", str(gemini_script), analysis_json
+        ])
+        
+        if result.get("success") and result.get("recommendations"):
+            return {
+                "success": True,
+                "recommendations": result["recommendations"],
+                "timestamp": datetime.now().isoformat(),
+                "language": request.language,
+                "model": result.get("model", "gemini-pro")
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Gemini failed: {result.get('error', 'Unknown error')}"
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Gemini recommendations failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get Gemini recommendations: {str(e)}")
+
+# ✅ SYSTEM MANAGEMENT ENDPOINTS
+@app.delete("/api/cleanup")
+async def cleanup_old_files():
+    """Clean up old analysis files (older than 24 hours)"""
+    try:
+        import time
+        current_time = time.time()
+        deleted_count = 0
+        deleted_files = []
+        
+        for file_path in UPLOAD_DIR.glob("*"):
+            if file_path.is_file():
+                # Check if file is older than 24 hours
+                file_age = current_time - file_path.stat().st_mtime
+                if file_age > 86400:  # 24 hours in seconds
+                    try:
+                        file_path.unlink()
+                        deleted_count += 1
+                        deleted_files.append(str(file_path.name))
+                        logger.info(f"Deleted old file: {file_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete {file_path}: {e}")
         
         return {
             "success": True,
-            "message": "OpenCV test completed",
-            "result": result
+            "message": f"Cleanup completed. Deleted {deleted_count} old files.",
+            "deletedCount": deleted_count,
+            "deletedFiles": deleted_files
         }
         
-    finally:
-        # Clean up temp file
-        if temp_path.exists():
-            temp_path.unlink()
+    except Exception as e:
+        logger.error(f"Cleanup failed: {e}")
+        raise HTTPException(status_code=500, detail="Cleanup failed")
 
-@app.post("/api/test/yolo")
-async def test_yolo(file: UploadFile = File(...)):
-    """Test YOLO analyzer"""
-    if not is_valid_image(file.filename):
-        raise HTTPException(status_code=400, detail="Invalid image file")
-    
-    # Save temporary file
-    temp_filename = f"test_yolo_{int(datetime.now().timestamp())}{get_file_extension(file.filename)}"
-    temp_path = UPLOAD_DIR / temp_filename
-    
+@app.get("/api/stats")
+async def get_system_stats():
+    """Get system statistics"""
     try:
-        await save_upload_file(file, temp_path)
+        # Count files
+        total_analyses = len(list(UPLOAD_DIR.glob("*_analysis.json")))
+        total_images = len([f for f in UPLOAD_DIR.glob("*") if f.suffix.lower() in {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}])
         
-        yolo_script = AI_MODELS_DIR / "yolo_analyzer.py"
-        if not yolo_script.exists():
-            raise HTTPException(status_code=503, detail="YOLO analyzer not available")
+        # Calculate storage usage
+        total_size = sum(f.stat().st_size for f in UPLOAD_DIR.glob("*") if f.is_file())
         
-        result = run_subprocess(["python", str(yolo_script), str(temp_path)])
+        # Check AI services
+        services_status = {}
+        # Check AI services
+        services_status = {}
+        for script in ["opencv_processor.py", "yolo_analyzer.py", "gemini_recommender.py"]:
+            script_path = AI_MODELS_DIR / script
+            services_status[script.replace(".py", "")] = script_path.exists()
         
         return {
             "success": True,
-            "message": "YOLO test completed",
-            "result": result
+            "stats": {
+                "totalAnalyses": total_analyses,
+                "totalImages": total_images,
+                "storageUsed": total_size,
+                "storageUsedMB": round(total_size / (1024 * 1024), 2),
+                "servicesStatus": services_status,
+                "uptime": datetime.now().isoformat()
+            }
         }
         
-    finally:
-        # Clean up temp file
-        if temp_path.exists():
-            temp_path.unlink()
+    except Exception as e:
+        logger.error(f"Failed to get stats: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get system stats")
 
-@app.post("/api/test/gemini")
-async def test_gemini(request: AnalysisRequest):
-    """Test Gemini recommender"""
+@app.get("/api/export/history")
+async def export_history():
+    
+    """Export analysis history as JSON"""
+    try:
+        history_data = []
+        
+        for analysis_file in UPLOAD_DIR.glob("*_analysis.json"):
+            try:
+                async with aiofiles.open(analysis_file, 'r') as f:
+                    content = await f.read()
+                    analysis = json.loads(content)
+                    history_data.append(analysis)
+            except Exception as e:
+                logger.warning(f"Failed to load analysis file {analysis_file}: {e}")
+                continue
+        
+        # Sort by timestamp
+        history_data.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        
+        export_data = {
+            "exportTimestamp": datetime.now().isoformat(),
+            "totalAnalyses": len(history_data),
+            "version": "2.0.0",
+            "data": history_data
+        }
+        
+        return JSONResponse(
+            content=export_data,
+            headers={
+                "Content-Disposition": f"attachment; filename=skinai_export_{int(datetime.now().timestamp())}.json"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Export failed: {e}")
+        raise HTTPException(status_code=500, detail="Export failed")
+
+# 🆕 ADVANCED GEMINI FEATURES
+@app.post("/api/gemini/compare")
+async def compare_analyses(analysis_ids: List[str]):
+    """Compare multiple analyses using Gemini AI"""
+    if len(analysis_ids) > 5:
+        raise HTTPException(status_code=400, detail="Maximum 5 analyses can be compared")
+    
     gemini_script = AI_MODELS_DIR / "gemini_recommender.py"
     if not gemini_script.exists():
         raise HTTPException(status_code=503, detail="Gemini recommender not available")
     
-    analysis_json = json.dumps(request.analysisData)
-    result = run_subprocess(["python", str(gemini_script), analysis_json])
+    try:
+        # Load all analyses
+        analyses_data = []
+        for analysis_id in analysis_ids:
+            analysis_file = UPLOAD_DIR / f"{analysis_id}_analysis.json"
+            if not analysis_file.exists():
+                raise HTTPException(status_code=404, detail=f"Analysis {analysis_id} not found")
+            
+            async with aiofiles.open(analysis_file, 'r') as f:
+                content = await f.read()
+                analysis = json.loads(content)
+                analyses_data.append({
+                    "analysisId": analysis_id,
+                    "skinAnalysis": analysis.get("skinAnalysis", {}),
+                    "timestamp": analysis.get("timestamp")
+                })
+        
+        # Prepare comparison data for Gemini
+        comparison_data = {
+            "requestType": "compare",
+            "analyses": analyses_data,
+            "language": "th"
+        }
+        
+        # Call Gemini script
+        comparison_json = json.dumps(comparison_data)
+        result = run_subprocess([
+            "python", str(gemini_script), comparison_json
+        ])
+        
+        if result.get("success"):
+            return {
+                "success": True,
+                "comparison": result.get("comparison", {}),
+                "analysisIds": analysis_ids,
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Comparison failed: {result.get('error', 'Unknown error')}"
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Comparison failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Comparison failed: {str(e)}")
+
+@app.post("/api/gemini/progress")
+async def track_progress(analysis_id: str, previous_analysis_ids: List[str]):
+    """Track skin progress over time using Gemini AI"""
+    gemini_script = AI_MODELS_DIR / "gemini_recommender.py"
+    if not gemini_script.exists():
+        raise HTTPException(status_code=503, detail="Gemini recommender not available")
     
-    return {
-        "success": True,
-        "message": "Gemini test completed",
-        "result": result
-    }
+    try:
+        # Load current analysis
+        current_file = UPLOAD_DIR / f"{analysis_id}_analysis.json"
+        if not current_file.exists():
+            raise HTTPException(status_code=404, detail="Current analysis not found")
+        
+        async with aiofiles.open(current_file, 'r') as f:
+            current_analysis = json.loads(await f.read())
+        
+        # Load previous analyses
+        previous_analyses = []
+        for prev_id in previous_analysis_ids:
+            prev_file = UPLOAD_DIR / f"{prev_id}_analysis.json"
+            if prev_file.exists():
+                async with aiofiles.open(prev_file, 'r') as f:
+                    prev_analysis = json.loads(await f.read())
+                    previous_analyses.append({
+                        "analysisId": prev_id,
+                        "skinAnalysis": prev_analysis.get("skinAnalysis", {}),
+                        "timestamp": prev_analysis.get("timestamp")
+                    })
+        
+        # Prepare progress tracking data
+        progress_data = {
+            "requestType": "progress",
+            "currentAnalysis": {
+                "analysisId": analysis_id,
+                "skinAnalysis": current_analysis.get("skinAnalysis", {}),
+                "timestamp": current_analysis.get("timestamp")
+            },
+            "previousAnalyses": previous_analyses,
+            "language": "th"
+        }
+        
+        # Call Gemini script
+        progress_json = json.dumps(progress_data)
+        result = run_subprocess([
+            "python", str(gemini_script), progress_json
+        ])
+        
+        if result.get("success"):
+            # Save progress report to current analysis
+            current_analysis["progressReport"] = {
+                "report": result.get("progress", {}),
+                "previousAnalyses": previous_analysis_ids,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Save updated analysis
+            async with aiofiles.open(current_file, 'w') as f:
+                await f.write(json.dumps(current_analysis, indent=2))
+            
+            return {
+                "success": True,
+                "progress": result.get("progress", {}),
+                "currentAnalysisId": analysis_id,
+                "previousAnalysisIds": previous_analysis_ids,
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Progress tracking failed: {result.get('error', 'Unknown error')}"
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Progress tracking failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Progress tracking failed: {str(e)}")
 
 # ✅ ERROR HANDLERS
 @app.exception_handler(HTTPException)
@@ -632,13 +921,13 @@ async def general_exception_handler(request, exc):
         }
     )
 
-# ✅ STARTUP EVENT
+# ✅ STARTUP/SHUTDOWN EVENTS
 @app.on_event("startup")
 async def startup_event():
     """Application startup event"""
-    logger.info("SkinAI Backend API starting up...")
-    logger.info(f"Upload directory: {UPLOAD_DIR.absolute()}")
-    logger.info(f"AI models directory: {AI_MODELS_DIR.absolute()}")
+    logger.info("🚀 SkinAI Backend API v2.0.0 starting up...")
+    logger.info(f"📁 Upload directory: {UPLOAD_DIR.absolute()}")
+    logger.info(f"🤖 AI models directory: {AI_MODELS_DIR.absolute()}")
     
     # Check AI model scripts
     scripts = ["opencv_processor.py", "yolo_analyzer.py", "gemini_recommender.py"]
@@ -648,11 +937,35 @@ async def startup_event():
             logger.info(f"✅ {script} found")
         else:
             logger.warning(f"⚠️  {script} not found")
+    
+    # Check environment variables
+    if os.getenv("GOOGLE_API_KEY"):
+        logger.info("✅ Google API Key configured")
+    else:
+        logger.warning("⚠️  Google API Key not found in environment")
+    
+    logger.info("🎯 Available endpoints:")
+    logger.info("   • Main API: /api/upload")
+    logger.info("   • Gemini AI: /api/gemini/*")
+    logger.info("   • Health Check: /api/health")
+    logger.info("   • Documentation: /docs")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Application shutdown event"""
-    logger.info("SkinAI Backend API shutting down...")
+    logger.info("🛑 SkinAI Backend API shutting down...")
+    
+    # Optional: Clean up temporary files
+    try:
+        temp_files = list(UPLOAD_DIR.glob("test_*"))
+        for temp_file in temp_files:
+            if temp_file.is_file():
+                temp_file.unlink()
+                logger.info(f"🗑️  Cleaned up temp file: {temp_file}")
+    except Exception as e:
+        logger.warning(f"⚠️  Cleanup warning: {e}")
+    
+    logger.info("✅ Shutdown completed successfully")
 
 # ✅ MAIN ENTRY POINT
 if __name__ == "__main__":
@@ -660,10 +973,11 @@ if __name__ == "__main__":
     
     # Get configuration from environment
     host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", 5000))
+    port = int(os.getenv("PORT", 5001))
     debug = os.getenv("DEBUG", "True").lower() == "true"
     
-    logger.info(f"Starting server on {host}:{port}")
+    logger.info(f"🌐 Starting server on {host}:{port}")
+    logger.info(f"🔧 Debug mode: {debug}")
     
     uvicorn.run(
         "main:app",
@@ -671,5 +985,7 @@ if __name__ == "__main__":
         port=port,
         reload=debug,
         log_level="info",
-        access_log=True
+        access_log=True,
+        reload_dirs=["./"] if debug else None
     )
+

@@ -7,5 +7,6 @@ node_modules
 # Frontend package lock
 /frontend/package-lock.json
 
-# Python virtual environment
-/backend/venv/
+/backend/skinai_env/
+
+/backend/uploads/

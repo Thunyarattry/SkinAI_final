@@ -1,500 +1,487 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 
-// API Configuration
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
-// Simple API helper functions
 const apiCall = async (endpoint, options = {}) => {
   const url = `${API_BASE_URL}${endpoint}`;
   
-  try {
-    const response = await fetch(url, {
-      headers: {
-        'Accept': 'application/json',
-        ...options.headers,
-      },
-      ...options,
-    });
+  const defaultOptions = {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+    ...options,
+  };
 
-    const data = await response.json();
+  try {
+    const response = await fetch(url, defaultOptions);
 
     if (!response.ok) {
-      throw new Error(data.error || `HTTP ${response.status}`);
+      let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorData.message || errorData.detail || errorMessage;
+      } catch {}
+      throw new Error(errorMessage);
     }
 
-    return data;
+    return await response.json();
   } catch (error) {
-    console.error('API Error:', error);
+    console.error(`❌ API Error: ${endpoint}`, error);
     throw error;
   }
 };
 
-const getAnalysis = (analysisId) => apiCall(`/api/analysis/${analysisId}`);
-const regenerateRecommendations = (analysisId) => apiCall(`/api/analysis/${analysisId}/regenerate`, { method: 'POST' });
+const getAnalysisReport = (analysisId) => {
+  return apiCall(`/api/analysis/${analysisId}/report`);
+};
+
+const getGeminiRecommendations = (skinAnalysis, prompt = '', language = 'th') => {
+  const requestBody = {
+    skinAnalysis,
+    prompt,
+    language,
+  };
+  return apiCall('/api/gemini/recommendations', {
+    method: 'POST',
+    body: JSON.stringify(requestBody),
+  });
+};
+
+const getGeminiStatus = () => {
+  return apiCall('/api/gemini/status');
+};
 
 export default function ReportPage() {
   const [reportData, setReportData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [error, setError] = useState(null);
-  const router = useRouter();
+  const [geminiRecommendations, setGeminiRecommendations] = useState(null);
+  const [geminiAvailable, setGeminiAvailable] = useState(false);
+  const [isGettingGemini, setIsGettingGemini] = useState(false);
+
   const searchParams = useSearchParams();
+  const analysisId = searchParams.get('id');
 
+  // 🔄 Load Data
   useEffect(() => {
-    return () => {
-      console.log('🧹 Report page unmounted - data cleared');
-    };
-  }, []);
+    const loadData = async () => {
+      if (!analysisId) {
+        setError('ไม่พบ Analysis ID - กรุณาระบุ ID ในพารามิเตอร์ ?id=your_analysis_id');
+        setLoading(false);
+        return;
+      }
 
-  useEffect(() => {
-    const loadReportData = async () => {
       try {
-        // ลองโหลดจาก URL parameter ก่อน
-        const analysisId = searchParams.get('id');
-        
-        if (analysisId) {
-          console.log('Loading analysis from API:', analysisId);
-          const apiData = await getAnalysis(analysisId);
-          
-          if (apiData.success) {
-            setReportData(apiData);
-            return;
+        // Load report data
+        const reportResult = await getAnalysisReport(analysisId);
+        if (reportResult.success) {
+          setReportData(reportResult.report);
+          if (reportResult.report.gemini_recommendations) {
+            setGeminiRecommendations(reportResult.report.gemini_recommendations);
           }
+        } else {
+          throw new Error(reportResult.error || 'Failed to load report');
         }
-        setError('No analysis data found');
-        
+
+        // Check Gemini status
+        try {
+          const geminiResult = await getGeminiStatus();
+          setGeminiAvailable(geminiResult.available || false);
+        } catch {
+          setGeminiAvailable(false);
+        }
       } catch (err) {
-        console.error('Error loading report data:', err);
-        setError(err.message || 'Failed to load analysis data');
+        setError(`ไม่สามารถโหลดรายงานได้: ${err.message}`);
       } finally {
         setLoading(false);
       }
     };
 
-    loadReportData();
-  }, [searchParams]);
+    loadData();
+  }, [analysisId]);
 
-  // ✅ PDF Download Function
-  const handleDownloadPdf = async () => {
-    setIsGeneratingPdf(true);
-    
-    try {
-      const content = document.getElementById('report-content');
-      
-      if (content) {
-        // สร้างหน้าต่างใหม่สำหรับ print
-        const printWindow = window.open('', '_blank');
-        
-        if (printWindow) {
-          printWindow.document.write(`
-            <!DOCTYPE html>
-            <html>
-              <head>
-                <title>SkinAI Report - ${new Date().toLocaleDateString('th-TH')}</title>
-                <meta charset="utf-8">
-                <style>
-                  * { box-sizing: border-box; }
-                  body { 
-                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-                    margin: 20px; 
-                    line-height: 1.6;
-                    color: #333;
-                  }
-                  .header { text-align: center; margin-bottom: 30px; }
-                  .section { margin-bottom: 25px; padding: 15px; border-radius: 8px; }
-                  .bg-blue-50 { background-color: #eff6ff; border-left: 4px solid #3b82f6; }
-                  .bg-yellow-50 { background-color: #fefce8; border-left: 4px solid #eab308; }
-                  .bg-indigo-50 { background-color: #eef2ff; border-left: 4px solid #6366f1; }
-                  .bg-green-50 { background-color: #f0fdf4; border-left: 4px solid #22c55e; }
-                  .bg-red-50 { background-color: #fef2f2; border-left: 4px solid #ef4444; }
-                  .bg-purple-50 { background-color: #faf5ff; border-left: 4px solid #a855f7; }
-                  .bg-orange-50 { background-color: #fff7ed; border-left: 4px solid #f97316; }
-                  .bg-gray-100 { background-color: #f3f4f6; border-left: 4px solid #6b7280; }
-                  h1 { color: #1f2937; font-size: 28px; margin-bottom: 10px; }
-                  h2 { color: #374151; font-size: 20px; margin-bottom: 15px; }
-                  h3 { color: #4b5563; font-size: 16px; margin-bottom: 10px; }
-                  ul, ol { padding-left: 20px; }
-                  li { margin-bottom: 8px; }
-                  .grid { display: flex; flex-wrap: wrap; gap: 15px; }
-                  .grid > div { flex: 1; min-width: 200px; }
-                  .font-semibold { font-weight: 600; }
-                  .text-center { text-align: center; }
-                  .no-print { display: none; }
-                  .timeline-item { 
-                    display: flex; 
-                    margin-bottom: 10px; 
-                    padding-bottom: 8px; 
-                    border-bottom: 1px solid #e5e7eb; 
-                  }
-                  .timeline-time { 
-                    font-weight: 600; 
-                    min-width: 120px; 
-                    color: #7c3aed; 
-                  }
-                  .timeline-desc { flex: 1; }
-                  @media print {
-                    body { margin: 0; font-size: 12px; }
-                    .section { page-break-inside: avoid; }
-                    h1 { font-size: 24px; }
-                    h2 { font-size: 18px; }
-                  }
-                </style>
-              </head>
-              <body>
-                <div class="header">
-                  <h1>📊 รายงานการดูแลผิวเฉพาะบุคคล</h1>
-                  <p>SkinAI Analysis Report - ${new Date().toLocaleDateString('th-TH', { 
-                    year: 'numeric', 
-                    month: 'long', 
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })}</p>
-                </div>
-                ${content.innerHTML.replace(/class="no-print[^"]*"/g, 'style="display:none"')}
-              </body>
-            </html>
-          `);
-          
-          printWindow.document.close();
-          
-          // รอให้โหลดเสร็จแล้วค่อย print
-          setTimeout(() => {
-            printWindow.print();
-            printWindow.close();
-          }, 500);
-        }
-      }
-    } catch (error) {
-      console.error('Error generating PDF:', error);
-      alert('เกิดข้อผิดพลาดในการสร้าง PDF กรุณาลองใหม่อีกครั้ง');
-    } finally {
-      setIsGeneratingPdf(false);
-    }
-  };
-
-  // Regenerate recommendations
-  const handleRegenerateRecommendations = async () => {
-    if (!reportData?.analysisId) return;
+  // 🤖 Get Gemini Recommendations
+  const handleGetGeminiRecommendations = async () => {
+    if (!reportData?.skin_analysis || !geminiAvailable) return;
 
     try {
-      setLoading(true);
-      const result = await regenerateRecommendations(reportData.analysisId);
-      
+      setIsGettingGemini(true);
+
+      const result = await getGeminiRecommendations(
+        { ...reportData.skin_analysis },
+        '',
+        'th'
+      );
+
       if (result.success) {
-        // Update report data with new recommendations
-        setReportData(prev => ({
-          ...prev,
-          recommendations: result.recommendations,
-          lastRegenerated: new Date().toISOString()
-        }));
-        
-        // Show success message
-        alert('คำแนะนำใหม่ถูกสร้างเรียบร้อยแล้ว!');
+        setGeminiRecommendations(result.recommendations);
+      } else {
+        throw new Error(result.error || 'Failed to get recommendations');
       }
     } catch (err) {
-      console.error('Error regenerating recommendations:', err);
-      alert('เกิดข้อผิดพลาดในการสร้างคำแนะนำใหม่: ' + err.message);
+      setError(`ไม่สามารถสร้างคำแนะนำ AI ได้: ${err.message}`);
     } finally {
-      setLoading(false);
+      setIsGettingGemini(false);
     }
   };
 
+  // 🔄 Loading State
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">กำลังโหลดรายงาน...</p>
-          </div>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <h2 className="text-lg font-medium text-gray-700">กำลังโหลดรายงาน...</h2>
+          {analysisId && (
+            <p className="text-sm text-gray-500 mt-2">Analysis ID: {analysisId}</p>
+          )}
         </div>
       </div>
     );
   }
 
-  if (error || !reportData) {
+  // ❌ Error State
+  if (error) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <div className="container mx-auto px-4 py-8">
-          <div className="text-center">
-            <div className="text-6xl mb-4">📊</div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-4">
-              {error ? 'เกิดข้อผิดพลาด' : 'ไม่มีรายงานที่ใช้ได้'}
-            </h1>
-            <p className="text-gray-600 mb-6">
-              {error || 'กรุณาทำการวิเคราะห์ผิวก่อน'}
-            </p>
-            <div className="space-x-4">
-              <button
-                onClick={() => router.push('/analysis')}
-                className="inline-block px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-              >
-                ไปวิเคราะห์ผิว
-              </button>
-              <button
-                onClick={() => router.push('/')}
-                className="inline-block px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors"
-              >
-                กลับหน้าหลัก
-              </button>
-            </div>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center max-w-2xl mx-auto p-6">
+          <div className="text-4xl mb-4">❌</div>
+          <h2 className="text-xl font-bold text-red-600 mb-4">เกิดข้อผิดพลาด</h2>
+          <div className="text-gray-600 mb-6 text-left bg-white p-4 rounded border">
+            <pre className="whitespace-pre-wrap text-sm">{error}</pre>
+          </div>
+          <div className="space-x-4">
+            <button
+              onClick={() => window.location.reload()}
+              className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+            >
+              ลองใหม่
+            </button>
+            <Link
+              href="/analysis"
+              className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 inline-block"
+            >
+              กลับหน้าหลัก
+            </Link>
           </div>
         </div>
       </div>
     );
   }
 
-  const { recommendations, skinAnalysis, faceDetection } = reportData;
-
+  // 📊 Main Content
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="container mx-auto px-4 py-8 max-w-4xl">
         
-        {/* Auto Clear Notice */}
-        <div className="mb-6 p-4 bg-yellow-50 rounded-lg border-l-4 border-yellow-400 no-print">
-          <div className="flex items-center space-x-2">
-            <span className="text-yellow-500">⚠️</span>
-            <p className="text-yellow-700 text-sm">
-              <strong>หมายเหตุ:</strong> รายงานนี้จะถูกลบทันทีเมื่อออกจากระบบหรือปิดหน้าต่าง
-            </p>
-          </div>
-        </div>
-
-        <div id="report-content" className="bg-white rounded-lg shadow-lg p-8">
-          <div className="flex justify-between items-center mb-8">
-            <h1 className="text-3xl font-bold text-gray-900">📊 รายงานการดูแลผิวเฉพาะบุคคล</h1>
+        {/* Header */}
+        <div className="bg-white rounded-lg shadow p-6 mb-6">
+          <Link href="/analysis" className="text-blue-600 hover:text-blue-800 mb-4 inline-block">
+            ← กลับไปวิเคราะห์ใหม่
+          </Link>
+          
+          <div className="flex justify-between items-start">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900 mb-2">รายงานการวิเคราะห์ผิว</h1>
+              <p className="text-gray-600">
+                สร้างเมื่อ: {new Date(reportData?.created_at).toLocaleDateString('th-TH', {
+                  year: 'numeric', month: 'long', day: 'numeric',
+                  hour: '2-digit', minute: '2-digit'
+                })}
+              </p>
+              <p className="text-sm text-gray-500">Analysis ID: {analysisId}</p>
+            </div>
             
-            {/* Action Buttons */}
-            <div className="no-print flex space-x-3">
-              {reportData?.analysisId && (
-                <button
-                  onClick={handleRegenerateRecommendations}
-                  disabled={loading}
-                  className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors font-medium flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <span>🔄</span>
-                  <span>สร้างคำแนะนำใหม่</span>
-                </button>
-              )}
-              
+            {geminiAvailable && !geminiRecommendations && (
               <button
-                onClick={handleDownloadPdf}
-                disabled={isGeneratingPdf}
-                className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleGetGeminiRecommendations}
+                disabled={isGettingGemini}
+                className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:opacity-50"
               >
-                {isGeneratingPdf ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    <span>กำลังสร้าง PDF...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>📄</span>
-                    <span>ดาวน์โหลด PDF</span>
-                  </>
-                )}
+                {isGettingGemini ? '🤖 กำลังสร้าง...' : '✨ สร้างคำแนะนำ AI'}
               </button>
-            </div>
-          </div>
-
-          {/* Analysis Summary */}
-          <div className="section bg-blue-50 p-6 rounded-lg mb-8">
-            <h2 className="text-xl font-semibold text-blue-900 mb-4">สรุปผลการวิเคราะห์</h2>
-            <div className="grid md:grid-cols-3 gap-4">
-              <div>
-                <span className="font-medium text-blue-800">ประเภทผิว:</span>
-                <div className="text-blue-700 font-semibold">{skinAnalysis?.skinType || 'ไม่ระบุ'}</div>
-              </div>
-              <div>
-                <span className="font-medium text-blue-800">ระดับความรุนแรง:</span>
-                <div className="text-blue-700 font-semibold">{skinAnalysis?.acneSeverity || 'ไม่ระบุ'}</div>
-              </div>
-              <div>
-                <span className="font-medium text-blue-800">ความแม่นยำ:</span>
-                <div className="text-blue-700 font-semibold">{skinAnalysis?.confidence || 0}%</div>
-              </div>
-            </div>
-            
-            {/* Face Detection Status */}
-            {faceDetection && (
-              <div className="mt-4 pt-4 border-t border-blue-200">
-                <div className="flex items-center space-x-2">
-                  <span className={`text-lg ${faceDetection.detected ? 'text-green-500' : 'text-red-500'}`}>
-                    {faceDetection.detected ? '✅' : '❌'}
-                  </span>
-                  <span className="font-medium text-blue-800">
-                    การตรวจจับใบหน้า: {faceDetection.detected ? 'สำเร็จ' : 'ไม่สำเร็จ'}
-                  </span>
-                </div>
-              </div>
             )}
           </div>
-
-          {/* Problems Found */}
-          {skinAnalysis?.detectedIssues && skinAnalysis.detectedIssues.length > 0 && (
-            <div className="section bg-orange-50 p-6 rounded-lg mb-8">
-              <h2 className="text-xl font-semibold text-orange-900 mb-4">🔍 ปัญหาผิวที่พบ</h2>
-              <ul className="list-disc list-inside space-y-2">
-                {skinAnalysis.detectedIssues.map((problem, index) => (
-                  <li key={index} className="text-orange-700">{problem}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Backend Recommendations */}
-          {recommendations && (
-            <>
-              {/* Skin Type Assessment */}
-              {recommendations.skinType && (
-                <div className="section bg-indigo-50 p-6 rounded-lg mb-8">
-                  <h2 className="text-2xl font-semibold text-gray-900 mb-4 flex items-center">
-                    <span className="mr-2">🔬</span>
-                    การประเมินประเภทผิว
-                  </h2>
-                  <p className="text-gray-700 leading-relaxed">{recommendations.skinType}</p>
-                </div>
-              )}
-
-              {/* Condition Assessment */}
-              {recommendations.conditionAssessment && (
-                <div className="section bg-yellow-50 p-6 rounded-lg mb-8">
-                  <h2 className="text-2xl font-semibold text-gray-900 mb-4 flex items-center">
-                    <span className="mr-2">📋</span>
-                    การประเมินสภาพผิว
-                  </h2>
-                  <p className="text-gray-700 leading-relaxed">{recommendations.conditionAssessment}</p>
-                </div>
-              )}
-
-              {/* Skincare Recommendations */}
-              {recommendations.skincareRecommendations && (
-                <div className="section bg-green-50 p-6 rounded-lg mb-8">
-                  <h2 className="text-2xl font-semibold text-gray-900 mb-4 flex items-center">
-                    <span className="mr-2">🧴</span>
-                    คำแนะนำการดูแลผิว
-                  </h2>
-                  <ul className="list-disc list-inside space-y-3">
-                    {recommendations.skincareRecommendations.map((recommendation, index) => (
-                      <li key={index} className="text-gray-700 leading-relaxed">{recommendation}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Lifestyle Recommendations */}
-              {recommendations.lifestyleRecommendations && (
-                <div className="section bg-purple-50 p-6 rounded-lg mb-8">
-                  <h2 className="text-2xl font-semibold text-gray-900 mb-4 flex items-center">
-                    <span className="mr-2">🏃‍♀️</span>
-                    คำแนะนำการดำเนินชีวิต
-                  </h2>
-                  <ul className="list-disc list-inside space-y-3">
-                    {recommendations.lifestyleRecommendations.map((recommendation, index) => (
-                      <li key={index} className="text-gray-700 leading-relaxed">{recommendation}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Dermatologist Advice */}
-              {recommendations.dermatologistAdvice && (
-                <div className="section bg-red-50 p-6 rounded-lg mb-8">
-                  <h2 className="text-2xl font-semibold text-gray-900 mb-4 flex items-center">
-                    <span className="mr-2">👩‍⚕️</span>
-                    คำแนะนำจากแพทย์ผิวหนัง
-                  </h2>
-                  <p className="text-gray-700 leading-relaxed">{recommendations.dermatologistAdvice}</p>
-                </div>
-              )}
-
-              {/* Improvement Timeline */}
-              {recommendations.improvementTimeline && (
-                <div className="section bg-gray-100 p-6 rounded-lg mb-8">
-                  <h2 className="text-2xl font-semibold text-gray-900 mb-4 flex items-center">
-                    <span className="mr-2">📅</span>
-                    ระยะเวลาที่คาดหวัง
-                  </h2>
-                  <p className="text-gray-700 leading-relaxed">{recommendations.improvementTimeline}</p>
-                </div>
-              )}
-            </>
-          )}
-
-          {/* Fallback if no recommendations */}
-          {!recommendations && (
-            <div className="section bg-yellow-50 p-6 rounded-lg mb-8">
-              <h2 className="text-xl font-semibold text-yellow-900 mb-4">⚠️ คำแนะนำทั่วไป</h2>
-              <ul className="list-disc list-inside space-y-2 text-yellow-700">
-                <li>ล้างหน้าด้วยผลิตภัณฑ์อ่อนโยน 2 ครั้งต่อวัน</li>
-                <li>ทาครีมกันแดดทุกวัน SPF 30 ขึ้นไป</li>
-                <li>ใช้ครีมบำรุงที่เหมาะกับประเภทผิว</li>
-                <li>ดื่มน้ำให้เพียงพอ อย่างน้อย 8 แก้วต่อวัน</li>
-                <li>หลีกเลี่ยงการสัมผัสหน้าด้วยมือที่ไม่สะอาด</li>
-              </ul>
-            </div>
-          )}
-
-          {/* Analysis Details */}
-          {skinAnalysis?.analysisDetails && (
-            <div className="section bg-gray-50 p-6 rounded-lg mb-8">
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">🔍 รายละเอียดการวิเคราะห์</h2>
-              <pre className="text-sm text-gray-600 whitespace-pre-wrap">
-                {JSON.stringify(skinAnalysis.analysisDetails, null, 2)}
-              </pre>
-            </div>
-          )}
-
-          {/* Disclaimer */}
-          <div className="section bg-gray-100 p-6 rounded-lg border-l-4 border-gray-400">
-            <h3 className="font-semibold text-gray-800 mb-2">⚠️ ข้อจำกัดความรับผิดชอบ</h3>
-            <p className="text-sm text-gray-600 leading-relaxed">
-              รายงานนี้เป็นเพียงการวิเคราะห์เบื้องต้นด้วยเทคโนโลยี AI และไม่สามารถทดแทนการตรวจวินิจฉัยโดยแพทย์ผิวหนังได้ 
-              หากมีปัญหาผิวหนังร้ายแรงหรือไม่ดีขึ้น กรุณาปรึกษาแพทย์ผิวหนังโดยตรง
-            </p>
-            
-            {reportData.timestamp && (
-              <div className="mt-3 pt-3 border-t border-gray-300">
-                <p className="text-xs text-gray-500">
-                  รายงานสร้างเมื่อ: {new Date(reportData.timestamp).toLocaleString('th-TH')}
-                  {reportData.lastRegenerated && (
-                    <span className="ml-4">
-                      อัปเดตล่าสุด: {new Date(reportData.lastRegenerated).toLocaleString('th-TH')}
-                    </span>
-                  )}
-                </p>
-                {reportData.analysisId && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    รหัสการวิเคราะห์: {reportData.analysisId}
-                  </p>
-                )}
-              </div>
-            )}
+          
+          <div className="mt-4 flex items-center space-x-4 text-sm">
+            <span className={`flex items-center space-x-1 ${
+              geminiAvailable ? 'text-green-600' : 'text-yellow-600'
+            }`}>
+              <span>{geminiAvailable ? '🤖' : '⚠️'}</span>
+              <span>Gemini AI: {geminiAvailable ? 'พร้อมใช้งาน' : 'ไม่พร้อมใช้งาน'}</span>
+            </span>
           </div>
         </div>
 
-        {/* Navigation */}
-        <div className="text-center mt-8 no-print">
-          <div className="space-x-4">
-            <button
-              onClick={() => router.push('/analysis')}
-              className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-            >
-              วิเคราะห์ใหม่
-            </button>
-            <button
-              onClick={() => router.push('/')}
-              className="px-6 py-2 text-gray-600 hover:text-gray-800 transition-colors"
-            >
-              กลับสู่หน้าหลัก
-            </button>
+        {/* Skin Analysis */}
+        {reportData?.skin_analysis && (
+          <div className="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">🔍 ผลการวิเคราะห์ผิว</h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Skin Type */}
+              <div>
+                <h3 className="font-medium text-gray-700 mb-2">ประเภทผิว</h3>
+                {reportData.skin_analysis.skin_type && (
+                  <SkinTypeBadge 
+                    type={reportData.skin_analysis.skin_type}
+                    confidence={reportData.skin_analysis.confidence}
+                  />
+                )}
+              </div>
+
+              {/* Skin Conditions */}
+              {reportData.skin_analysis.conditions && (
+                <div>
+                  <h3 className="font-medium text-gray-700 mb-2">สภาพผิว</h3>
+                  <div className="space-y-2">
+                    {Object.entries(reportData.skin_analysis.conditions).map(([condition, severity]) => (
+                      <div key={condition} className="flex justify-between">
+                        <span className="text-sm text-gray-600 capitalize">{condition}</span>
+                        <span className={`px-2 py-1 rounded text-xs font-medium ${
+                          severity === 'high' ? 'bg-red-100 text-red-800' :
+                          severity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-green-100 text-green-800'
+                        }`}>
+                          {severity}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Analysis Details */}
+            {reportData.skin_analysis.details && (
+              <div className="mt-4 p-4 bg-gray-50 rounded">
+                <h3 className="font-medium text-gray-700 mb-2">รายละเอียด</h3>
+                <p className="text-gray-600 text-sm">{reportData.skin_analysis.details}</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Standard Recommendations */}
+        {reportData?.recommendations && (
+          <div className="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">💡 คำแนะนำทั่วไป</h2>
+            
+            {/* Skincare Routine */}
+            {reportData.recommendations.skincare_routine && (
+              <div className="mb-6">
+                <h3 className="font-medium text-gray-700 mb-3">ขั้นตอนการดูแลผิว</h3>
+                <ol className="space-y-2">
+                  {reportData.recommendations.skincare_routine.map((step, index) => (
+                    <li key={index} className="flex items-start space-x-3">
+                      <span className="flex-shrink-0 w-6 h-6 bg-blue-500 text-white rounded-full flex items-center justify-center text-xs font-medium">
+                        {index + 1}
+                      </span>
+                      <span className="text-gray-700">{step}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+
+            {/* Products */}
+            {reportData.recommendations.products && (
+              <div className="mb-6">
+                <h3 className="font-medium text-gray-700 mb-3">ผลิตภัณฑ์ที่แนะนำ</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {reportData.recommendations.products.map((product, index) => (
+                    <div key={index} className="p-3 border rounded">
+                      <div className="font-medium text-gray-800">{product.name}</div>
+                      <div className="text-sm text-gray-600">{product.type}</div>
+                      {product.reason && (
+                        <div className="text-xs text-gray-500 mt-1">{product.reason}</div>
+                      )}
+                      {product.price_range && (
+                        <div className="text-xs text-green-600 mt-1 font-medium">{product.price_range}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Tips */}
+            {reportData.recommendations.tips && (
+              <div>
+                <h3 className="font-medium text-gray-700 mb-3">เคล็ดลับการดูแล</h3>
+                <ul className="space-y-1">
+                  {reportData.recommendations.tips.map((tip, index) => (
+                    <li key={index} className="text-gray-700 text-sm flex items-start space-x-2">
+                      <span className="text-blue-500 mt-1">•</span>
+                      <span>{tip}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ✅ Gemini AI Recommendations - รองรับ Response Structure ใหม่ */}
+        {geminiRecommendations && (
+          <div className="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">🤖 คำแนะนำจาก AI</h2>
+
+            {/* Immediate Care */}
+            {geminiRecommendations.immediate_care && geminiRecommendations.immediate_care.length > 0 && (
+              <div className="mb-6">
+                <h3 className="font-medium text-red-700 mb-3 flex items-center">
+                  🚨 การดูแลเร่งด่วน
+                </h3>
+                <div className="bg-red-50 border border-red-200 rounded p-4">
+                  <ul className="space-y-2">
+                    {geminiRecommendations.immediate_care.map((item, i) => (
+                      <li key={i} className="text-red-800 text-sm flex items-start space-x-2">
+                        <span className="text-red-500 mt-1">⚠️</span>
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {/* Daily Skincare */}
+            {geminiRecommendations.daily_skincare && geminiRecommendations.daily_skincare.length > 0 && (
+              <div className="mb-6">
+                <h3 className="font-medium text-blue-700 mb-3 flex items-center">
+                  🌅 การดูแลประจำวัน
+                </h3>
+                <div className="bg-blue-50 border border-blue-200 rounded p-4">
+                  <ul className="space-y-2">
+                    {geminiRecommendations.daily_skincare.map((item, i) => (
+                      <li key={i} className="text-blue-800 text-sm flex items-start space-x-2">
+                        <span className="text-blue-500 mt-1">💧</span>
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {/* Products Suggested */}
+            {geminiRecommendations.products_suggested && geminiRecommendations.products_suggested.length > 0 && (
+              <div className="mb-6">
+                <h3 className="font-medium text-green-700 mb-3 flex items-center">
+                  🛍️ ผลิตภัณฑ์ที่แนะนำ
+                </h3>
+                <div className="bg-green-50 border border-green-200 rounded p-4">
+                  <ul className="space-y-2">
+                    {geminiRecommendations.products_suggested.map((item, i) => (
+                      <li key={i} className="text-green-800 text-sm flex items-start space-x-2">
+                        <span className="text-green-500 mt-1">✨</span>
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {/* Lifestyle Tips */}
+            {geminiRecommendations.lifestyle_tips && geminiRecommendations.lifestyle_tips.length > 0 && (
+              <div className="mb-6">
+                <h3 className="font-medium text-purple-700 mb-3 flex items-center">
+                  🌿 การดูแลสุขภาพ
+                </h3>
+                <div className="bg-purple-50 border border-purple-200 rounded p-4">
+                  <ul className="space-y-2">
+                    {geminiRecommendations.lifestyle_tips.map((item, i) => (
+                      <li key={i} className="text-purple-800 text-sm flex items-start space-x-2">
+                        <span className="text-purple-500 mt-1">🏃‍♀️</span>
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {/* Things to Avoid */}
+            {geminiRecommendations.avoid && geminiRecommendations.avoid.length > 0 && (
+              <div className="mb-6">
+                <h3 className="font-medium text-orange-700 mb-3 flex items-center">
+                  ⚠️ สิ่งที่ควรหลีกเลี่ยง
+                </h3>
+                <div className="bg-orange-50 border border-orange-200 rounded p-4">
+                  <ul className="space-y-2">
+                    {geminiRecommendations.avoid.map((item, i) => (
+                      <li key={i} className="text-orange-800 text-sm flex items-start space-x-2">
+                        <span className="text-orange-500 mt-1">🚫</span>
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {/* Footer */}
+            <div className="mt-6 text-xs text-gray-500 border-t pt-4">
+              <div className="flex justify-between items-center">
+                <p>สร้างโดย Google Gemini AI | คำแนะนำเบื้องต้น ควรปรึกษาผู้เชี่ยวชาญ</p>
+                <p className="text-gray-400">
+                  {new Date().toLocaleDateString('th-TH')}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Footer */}
+        <div className="bg-white rounded-lg shadow p-6 text-center">
+          <p className="text-sm text-gray-600 mb-2">
+            รายงานนี้สร้างขึ้นโดย SkinAI Analysis System
+          </p>
+          <p className="text-xs text-gray-500">
+            คำแนะนำในรายงานนี้เป็นเพียงข้อมูลเบื้องต้น ควรปรึกษาผู้เชี่ยวชาญด้านผิวหนัง
+          </p>
+          <div className="mt-3 text-xs text-gray-400">
+            {new Date().toLocaleDateString('th-TH')} • ข้อมูลเฉพาะบุคคล
           </div>
         </div>
       </div>
     </div>
   );
 }
+
+// 🎨 Skin Type Badge Component
+const SkinTypeBadge = ({ type, confidence }) => {
+  const getTypeInfo = (type) => {
+    const typeMap = {
+      'dry': { color: 'bg-yellow-100 text-yellow-800', icon: '🏜️', label: 'ผิวแห้ง' },
+      'oily': { color: 'bg-blue-100 text-blue-800', icon: '💧', label: 'ผิวมัน' },
+      'combination': { color: 'bg-purple-100 text-purple-800', icon: '🌓', label: 'ผิวผสม' },
+      'sensitive': { color: 'bg-red-100 text-red-800', icon: '🌸', label: 'ผิวแพ้ง่าย' },
+      'normal': { color: 'bg-green-100 text-green-800', icon: '✨', label: 'ผิวปกติ' }
+    };
+    return typeMap[type?.toLowerCase()] || { color: 'bg-gray-100 text-gray-800', icon: '❓', label: type };
+  };
+
+  const typeInfo = getTypeInfo(type);
+
+  return (
+    <span className={`inline-flex items-center px-3 py-2 rounded-full text-sm font-medium ${typeInfo.color}`}>
+      <span className="mr-2">{typeInfo.icon}</span>
+      {typeInfo.label}
+      {confidence && (
+        <span className="ml-2 text-xs opacity-75">
+          ({Math.round(confidence * 100)}%)
+        </span>
+      )}
+    </span>
+  );
+};
