@@ -23,7 +23,7 @@ export default function Navbar() {
   const navItems = [
     { href: '/upload', label: 'Upload' },
     { href: '/analysis', label: 'Analysis' },
-    { href: '/report', label: 'Report' },
+    // { href: '/report', label: 'Report' },
     { href: '/history', label: 'History' },
   ]
 

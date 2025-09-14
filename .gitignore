@@ -10,4 +10,10 @@ node_modules
 /backend/skinai_env/
 
 /backend/uploads/
+
 /backend/venv/
+
+# Python cache files
+__pycache__/
+
+/backend/.env
