@@ -79,15 +79,91 @@ export default function ReportPage() {
       }
 
       try {
-        // Load report data
-        const reportResult = await getAnalysisReport(analysisId);
-        if (reportResult.success) {
-          setReportData(reportResult.report);
-          if (reportResult.report.gemini_recommendations) {
-            setGeminiRecommendations(reportResult.report.gemini_recommendations);
+        // ✅ ลองโหลดจาก sessionStorage ก่อน (จากหน้า Analysis)
+        const sessionReportData = sessionStorage.getItem('current_analysis_report');
+        
+        if (sessionReportData) {
+          // ใช้ข้อมูลจาก sessionStorage
+          const parsedData = JSON.parse(sessionReportData);
+          
+          // ตรวจสอบว่า ID ตรงกันหรือไม่
+          if (parsedData.analysisId === analysisId) {
+            setReportData(parsedData);
+            
+            if (parsedData.gemini_recommendations) {
+              setGeminiRecommendations(parsedData.gemini_recommendations);
+            }
+            
+            // Check Gemini status
+            try {
+              const geminiResult = await getGeminiStatus();
+              setGeminiAvailable(geminiResult.available || false);
+            } catch {
+              setGeminiAvailable(false);
+            }
+            
+            setLoading(false);
+            return;
           }
-        } else {
-          throw new Error(reportResult.error || 'Failed to load report');
+        }
+
+        // ถ้าไม่มีใน sessionStorage หรือ ID ไม่ตรง ให้ลองเรียก API
+        try {
+          const reportResult = await getAnalysisReport(analysisId);
+          if (reportResult.success) {
+            setReportData(reportResult.report);
+            if (reportResult.report.gemini_recommendations) {
+              setGeminiRecommendations(reportResult.report.gemini_recommendations);
+            }
+          } else {
+            throw new Error(reportResult.error || 'Failed to load report');
+          }
+        } catch (apiError) {
+          // ถ้า API ล้มเหลว ให้ลองหาจาก localStorage history
+          try {
+            const historyStr = localStorage.getItem('skinai_history');
+            if (historyStr) {
+              const history = JSON.parse(historyStr);
+              const foundAnalysis = history.find(item => item.id === analysisId);
+              
+              if (foundAnalysis) {
+                // แปลงข้อมูลจาก history เป็นรูปแบบ report
+                const convertedReport = {
+                  analysisId: foundAnalysis.id,
+                  created_at: foundAnalysis.ts,
+                  skin_analysis: {
+                    skin_type: foundAnalysis.skinType || 'Unknown',
+                    primary_condition: foundAnalysis.skinCondition || 'Unknown',
+                    severity_level: foundAnalysis.severity || 'Unknown',
+                    confidence_score: (foundAnalysis.severityScore || 0) / 100,
+                    confidence: foundAnalysis.severityScore || 0,
+                    conditions: {},
+                    details: 'Analysis from history',
+                    analysis_method: foundAnalysis.analysisMethod || 'Standard Analysis'
+                  },
+                  recommendations: {
+                    skincare_routine: foundAnalysis.recommendations || [
+                      'ทำความสะอาดผิวหน้าด้วยผลิตภัณฑ์อ่อนโยน',
+                      'ใช้ครีมบำรุงที่เหมาะกับประเภทผิว',
+                      'ทาครีมกันแดดทุกวัน'
+                    ],
+                    products: [],
+                    tips: []
+                  },
+                  image_url: foundAnalysis.image,
+                  face_detected: foundAnalysis.faceDetected || false
+                };
+                
+                setReportData(convertedReport);
+                setLoading(false);
+                return;
+              }
+            }
+            
+            throw new Error(`ไม่พบข้อมูลการวิเคราะห์สำหรับ ID: ${analysisId}`);
+          } catch (historyError) {
+            throw apiError; // ใช้ error จาก API แทน
+          }
         }
 
         // Check Gemini status
@@ -97,7 +173,9 @@ export default function ReportPage() {
         } catch {
           setGeminiAvailable(false);
         }
+        
       } catch (err) {
+        console.error('Error loading report:', err);
         setError(`ไม่สามารถโหลดรายงานได้: ${err.message}`);
       } finally {
         setLoading(false);
@@ -122,6 +200,14 @@ export default function ReportPage() {
 
       if (result.success) {
         setGeminiRecommendations(result.recommendations);
+        
+        // บันทึกผลลัพธ์ลง sessionStorage
+        const updatedReportData = {
+          ...reportData,
+          gemini_recommendations: result.recommendations
+        };
+        sessionStorage.setItem('current_analysis_report', JSON.stringify(updatedReportData));
+        
       } else {
         throw new Error(result.error || 'Failed to get recommendations');
       }
@@ -170,6 +256,12 @@ export default function ReportPage() {
             >
               กลับหน้าหลัก
             </Link>
+            <Link
+              href="/history"
+              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 inline-block"
+            >
+              ดูประวัติ
+            </Link>
           </div>
         </div>
       </div>
@@ -183,9 +275,15 @@ export default function ReportPage() {
         
         {/* Header */}
         <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <Link href="/analysis" className="text-blue-600 hover:text-blue-800 mb-4 inline-block">
-            ← กลับไปวิเคราะห์ใหม่
-          </Link>
+          <div className="flex items-center gap-4 mb-4">
+            <Link href="/analysis" className="text-blue-600 hover:text-blue-800">
+              ← กลับไปวิเคราะห์ใหม่
+            </Link>
+            <span className="text-gray-300">|</span>
+            <Link href="/history" className="text-blue-600 hover:text-blue-800">
+              ดูประวัติทั้งหมด
+            </Link>
+          </div>
           
           <div className="flex justify-between items-start">
             <div>
@@ -217,8 +315,32 @@ export default function ReportPage() {
               <span>{geminiAvailable ? '🤖' : '⚠️'}</span>
               <span>Gemini AI: {geminiAvailable ? 'พร้อมใช้งาน' : 'ไม่พร้อมใช้งาน'}</span>
             </span>
+            
+            {reportData?.face_detected && (
+              <span className="flex items-center space-x-1 text-green-600">
+                <span>✅</span>
+                <span>Face Detected</span>
+              </span>
+            )}
           </div>
         </div>
+
+        {/* Analysis Image */}
+        {reportData?.image_url && (
+          <div className="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">📸 รูปภาพที่วิเคราะห์</h2>
+            <div className="flex justify-center">
+              <img 
+                src={reportData.image_url} 
+                alt="Analysis subject" 
+                className="max-w-md w-full rounded-lg shadow-md"
+                onError={(e) => {
+                  e.target.style.display = 'none';
+                }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Skin Analysis */}
         {reportData?.skin_analysis && (
@@ -237,27 +359,54 @@ export default function ReportPage() {
                 )}
               </div>
 
-              {/* Skin Conditions */}
-              {reportData.skin_analysis.conditions && (
-                <div>
-                  <h3 className="font-medium text-gray-700 mb-2">สภาพผิว</h3>
-                  <div className="space-y-2">
-                    {Object.entries(reportData.skin_analysis.conditions).map(([condition, severity]) => (
-                      <div key={condition} className="flex justify-between">
-                        <span className="text-sm text-gray-600 capitalize">{condition}</span>
-                        <span className={`px-2 py-1 rounded text-xs font-medium ${
-                          severity === 'high' ? 'bg-red-100 text-red-800' :
-                          severity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                          'bg-green-100 text-green-800'
-                        }`}>
-                          {severity}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+              {/* Primary Condition */}
+              <div>
+                <h3 className="font-medium text-gray-700 mb-2">สภาพผิวหลัก</h3>
+                <div className="flex items-center gap-2">
+                  <span className="px-3 py-2 bg-blue-100 text-blue-800 rounded-lg text-sm font-medium">
+                    {reportData.skin_analysis.primary_condition}
+                  </span>
+                  <span className="text-sm text-gray-500">
+                    ({Math.round((reportData.skin_analysis.confidence_score || 0) * 100)}%)
+                  </span>
                 </div>
-              )}
+              </div>
+
+              {/* Severity Level */}
+              <div>
+                <h3 className="font-medium text-gray-700 mb-2">ระดับความรุนแรง</h3>
+                <SeverityBadge severity={reportData.skin_analysis.severity_level} />
+              </div>
+
+              {/* Analysis Method */}
+              <div>
+                <h3 className="font-medium text-gray-700 mb-2">วิธีการวิเคราะห์</h3>
+                <span className="text-sm text-gray-600">
+                  {reportData.skin_analysis.analysis_method || 'Standard Analysis'}
+                </span>
+              </div>
             </div>
+
+            {/* Skin Conditions */}
+            {reportData.skin_analysis.conditions && Object.keys(reportData.skin_analysis.conditions).length > 0 && (
+              <div className="mt-6">
+                <h3 className="font-medium text-gray-700 mb-3">สภาพผิวที่ตรวจพบ</h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {Object.entries(reportData.skin_analysis.conditions).map(([condition, severity]) => (
+                    <div key={condition} className="flex justify-between items-center p-2 bg-gray-50 rounded">
+                      <span className="text-sm text-gray-600 capitalize">{condition}</span>
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${
+                        severity === 'high' ? 'bg-red-100 text-red-800' :
+                        severity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-green-100 text-green-800'
+                      }`}>
+                        {severity}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Analysis Details */}
             {reportData.skin_analysis.details && (
@@ -275,7 +424,7 @@ export default function ReportPage() {
             <h2 className="text-xl font-semibold text-gray-900 mb-4">💡 คำแนะนำทั่วไป</h2>
             
             {/* Skincare Routine */}
-            {reportData.recommendations.skincare_routine && (
+            {reportData.recommendations.skincare_routine && reportData.recommendations.skincare_routine.length > 0 && (
               <div className="mb-6">
                 <h3 className="font-medium text-gray-700 mb-3">ขั้นตอนการดูแลผิว</h3>
                 <ol className="space-y-2">
@@ -292,7 +441,7 @@ export default function ReportPage() {
             )}
 
             {/* Products */}
-            {reportData.recommendations.products && (
+            {reportData.recommendations.products && reportData.recommendations.products.length > 0 && (
               <div className="mb-6">
                 <h3 className="font-medium text-gray-700 mb-3">ผลิตภัณฑ์ที่แนะนำ</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -313,7 +462,7 @@ export default function ReportPage() {
             )}
 
             {/* Tips */}
-            {reportData.recommendations.tips && (
+            {reportData.recommendations.tips && reportData.recommendations.tips.length > 0 && (
               <div>
                 <h3 className="font-medium text-gray-700 mb-3">เคล็ดลับการดูแล</h3>
                 <ul className="space-y-1">
@@ -482,6 +631,29 @@ const SkinTypeBadge = ({ type, confidence }) => {
           ({Math.round(confidence * 100)}%)
         </span>
       )}
+    </span>
+  );
+};
+
+// 🎨 Severity Badge Component
+const SeverityBadge = ({ severity }) => {
+  const getSeverityInfo = (severity) => {
+    const severityMap = {
+      'good': { color: 'bg-green-100 text-green-800', icon: '✅', label: 'ดี' },
+      'mild': { color: 'bg-yellow-100 text-yellow-800', icon: '⚠️', label: 'เล็กน้อย' },
+      'moderate': { color: 'bg-orange-100 text-orange-800', icon: '🔶', label: 'ปานกลาง' },
+      'severe': { color: 'bg-red-100 text-red-800', icon: '🔴', label: 'รุนแรง' },
+      'unknown': { color: 'bg-gray-100 text-gray-800', icon: '❓', label: 'ไม่ทราบ' }
+    };
+    return severityMap[severity?.toLowerCase()] || severityMap['unknown'];
+  };
+
+  const severityInfo = getSeverityInfo(severity);
+
+  return (
+    <span className={`inline-flex items-center px-3 py-2 rounded-full text-sm font-medium ${severityInfo.color}`}>
+      <span className="mr-2">{severityInfo.icon}</span>
+      {severityInfo.label}
     </span>
   );
 };

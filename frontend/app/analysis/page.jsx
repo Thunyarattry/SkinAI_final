@@ -13,53 +13,59 @@ export default function AnalysisPage() {
   useEffect(() => {
     const loadAnalysisData = () => {
       try {
-        // ✅ เปลี่ยนจาก localStorage เป็น sessionStorage
-        const uploadStr = sessionStorage.getItem('skinai_last_upload');
+        // ✅ อ่านข้อมูลจาก sessionStorage
+        const storedData = sessionStorage.getItem('skinai_analysis_result');
         const storedPreviewUrl = sessionStorage.getItem('skinai_preview_url');
         
-        if (!uploadStr) {
-          setError('No analysis data found');
+        if (!storedData) {
+          setError('No analysis data found. Please upload an image first.');
           setLoading(false);
           return;
         }
 
-        const uploadData = JSON.parse(uploadStr);
+        const analysisResponse = JSON.parse(storedData);
+        console.log('📊 Loaded analysis data:', analysisResponse);
         
-        // ตรวจสอบว่ามีข้อมูลการวิเคราะห์หรือไม่
-        if (!uploadData.analysisId && !uploadData.analysisResults) {
-          setError('Invalid analysis data');
+        // ✅ จัดการโครงสร้างข้อมูลที่หลากหลาย
+        let finalData = null;
+        
+        if (analysisResponse.success) {
+          if (analysisResponse.analysisResults) {
+            // โครงสร้างใหม่: { success: true, analysisResults: {...} }
+            finalData = {
+              ...analysisResponse.analysisResults,
+              analysisId: analysisResponse.analysisId || analysisResponse.analysisResults.analysisId
+            };
+          } else {
+            // โครงสร้างเก่า: { success: true, ...data }
+            finalData = analysisResponse;
+          }
+        } else {
+          // กรณี error
+          setError(analysisResponse.error || 'Analysis failed');
           setLoading(false);
           return;
         }
-
-        // ✅ จัดการข้อมูลที่อาจมีโครงสร้างต่างกัน
-        let finalAnalysisData;
-        if (uploadData.analysisResults) {
-          // ข้อมูลจาก API response ใหม่
-          finalAnalysisData = uploadData;
-        } else {
-          // ข้อมูลรูปแบบเก่า
-          finalAnalysisData = {
-            analysisResults: uploadData,
-            preview: storedPreviewUrl,
-            name: uploadData.name || uploadData.originalFileName || 'Unknown',
-            uploadTime: uploadData.uploadTime
-          };
+        
+        // ✅ ตรวจสอบว่ามี analysisId หรือไม่
+        if (!finalData.analysisId) {
+          finalData.analysisId = `analysis_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          console.log('⚠️ Generated missing analysisId:', finalData.analysisId);
         }
-
-        setAnalysisData(finalAnalysisData);
+        
+        setAnalysisData(finalData);
         
         // ตั้งค่า preview URL
         if (storedPreviewUrl) {
           setPreviewUrl(storedPreviewUrl);
-        } else if (finalAnalysisData.preview) {
-          setPreviewUrl(finalAnalysisData.preview);
+        } else if (finalData.originalImage) {
+          setPreviewUrl(finalData.originalImage);
         }
         
         setLoading(false);
         
       } catch (e) {
-        console.error('Failed to load analysis data:', e);
+        console.error('❌ Failed to load analysis data:', e);
         setError('Failed to load analysis data');
         setLoading(false);
       }
@@ -67,6 +73,83 @@ export default function AnalysisPage() {
 
     loadAnalysisData();
   }, []);
+
+  // ✅ ฟังก์ชันสร้าง Report ที่ปรับปรุงแล้ว
+  const generateReport = () => {
+    try {
+      if (!analysisData) {
+        alert('No analysis data available');
+        return;
+      }
+      
+      const analysisId = analysisData.analysisId;
+      
+      if (!analysisId) {
+        alert('Missing analysis ID');
+        return;
+      }
+      
+      // เตรียมข้อมูลสำหรับ Report
+      const reportData = {
+        analysisId: analysisId,
+        created_at: analysisData.timestamp || new Date().toISOString(),
+        skin_analysis: {
+          skin_type: analysisData.skinType || 'Unknown',
+          primary_condition: analysisData.skinCondition || 'Unknown',
+          severity_level: analysisData.severity || 'Unknown',
+          confidence_score: (analysisData.confidence || 0) / 100,
+          confidence: analysisData.confidence || 0,
+          conditions: analysisData.affectedAreas ? 
+            analysisData.affectedAreas.reduce((acc, area) => {
+              acc[area.area.toLowerCase()] = area.severity.toLowerCase();
+              return acc;
+            }, {}) : {},
+          details: analysisData.detectionMessage || 'Analysis completed successfully',
+          analysis_method: analysisData.detectionMethod || 'Standard Analysis'
+        },
+        recommendations: {
+          skincare_routine: analysisData.recommendations || [
+            'ทำความสะอาดผิวหน้าด้วยผลิตภัณฑ์อ่อนโยน',
+            'ใช้ครีมบำรุงที่เหมาะกับประเภทผิว',
+            'ทาครีมกันแดดทุกวัน',
+            'ดื่มน้ำให้เพียงพอ'
+          ],
+          products: analysisData.productSuggestions ? 
+            Object.entries(analysisData.productSuggestions).map(([type, product]) => ({
+              name: product,
+              type: type,
+              reason: `เหมาะสำหรับ${analysisData.skinType || 'ผิวทั่วไป'}`
+            })) : [
+              { name: 'Gentle Cleanser', type: 'cleanser', reason: 'ทำความสะอาดอ่อนโยน' },
+              { name: 'Moisturizer', type: 'moisturizer', reason: 'บำรุงผิวให้ชุมชื้น' },
+              { name: 'Sunscreen SPF 30+', type: 'sunscreen', reason: 'ป้องกันแสงแดด' }
+            ],
+          tips: analysisData.lifestyleTips || [
+            'หลีกเลี่ยงการสัมผัสหน้าด้วยมือที่ไม่สะอาด',
+            'นอนหลับให้เพียงพอ 7-8 ชั่วโมงต่อวัน',
+            'รับประทานอาหารที่มีวิตามินและแร่ธาตุ',
+            'ออกกำลังกายสม่ำเสมอ'
+          ]
+        },
+        image_url: previewUrl || analysisData.originalImage,
+        face_detected: analysisData.faceDetected || false,
+        processing_time: analysisData.processing_time,
+        gemini_recommendations: analysisData.geminiSuccess || false
+      };
+
+      // บันทึกข้อมูลลง sessionStorage
+      sessionStorage.setItem('current_analysis_report', JSON.stringify(reportData));
+      
+      console.log('✅ Report data prepared:', reportData);
+      
+      // ไปหน้า Report พร้อม ID
+      router.push(`/report?id=${analysisId}`);
+      
+    } catch (error) {
+      console.error('❌ Failed to generate report:', error);
+      alert('Failed to generate report. Please try again.');
+    }
+  };
 
   // Loading State
   if (loading) {
@@ -90,26 +173,25 @@ export default function AnalysisPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
             </svg>
           </div>
-          <h2 className="text-xl font-bold text-gray-900 mb-2">No Analysis Found</h2>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Analysis Not Found</h2>
           <p className="text-gray-600 mb-6">{error || 'Please upload an image first'}</p>
           <button 
             onClick={() => router.push('/upload')}
             className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700"
           >
-            Go to Upload
+            Upload New Image
           </button>
         </div>
       </div>
     );
   }
 
-  // ✅ จัดการข้อมูลที่อาจมีโครงสร้างต่างกัน
-  const analysisResults = analysisData.analysisResults || analysisData;
-  const displayName = analysisData.name || analysisResults.originalFileName || 'Analysis';
-  const displayTime = analysisData.uploadTime || analysisResults.uploadTime;
-  const displayPreview = previewUrl || analysisData.preview || analysisResults.originalImage;
+  // ✅ จัดการข้อมูลที่แสดงผล
+  const displayName = analysisData.originalFileName || analysisData.fileInfo?.name || 'Analysis';
+  const displayTime = analysisData.timestamp;
+  const displayPreview = previewUrl || analysisData.originalImage || analysisData.croppedImage;
 
-  // Get status color based on analysis results
+  // Status color functions
   const getStatusColor = (status) => {
     if (status?.includes('Complete')) return 'text-green-600 bg-green-100';
     if (status?.includes('Partial')) return 'text-yellow-600 bg-yellow-100';
@@ -141,14 +223,23 @@ export default function AnalysisPage() {
               <p className="text-gray-600">
                 {displayName} • {displayTime ? `Analyzed on ${new Date(displayTime).toLocaleString()}` : 'Recent analysis'}
               </p>
+              {/* ✅ แสดง Analysis ID */}
+              <p className="text-sm text-gray-500">
+                ID: {analysisData.analysisId}
+              </p>
             </div>
             <div className="flex items-center gap-3">
-              <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(analysisResults.analysisStatus)}`}>
-                {analysisResults.analysisStatus || 'Analysis Complete'}
+              <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor('Complete')}`}>
+                Analysis Complete
               </span>
-              {analysisResults.faceDetected && (
+              {analysisData.faceDetected && (
                 <span className="px-3 py-1 rounded-full text-sm font-medium text-green-600 bg-green-100">
                   Face Detected
+                </span>
+              )}
+              {analysisData.geminiSuccess && (
+                <span className="px-3 py-1 rounded-full text-sm font-medium text-purple-600 bg-purple-100">
+                  AI Enhanced
                 </span>
               )}
             </div>
@@ -184,18 +275,18 @@ export default function AnalysisPage() {
                 >
                   <div className="text-center">
                     <svg className="w-12 h-12 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
                     <p className="text-sm">Image not available</p>
                   </div>
                 </div>
 
                 {/* Processed Image */}
-                {analysisResults.croppedImage && analysisResults.croppedImage !== displayPreview && (
+                {analysisData.croppedImage && analysisData.croppedImage !== displayPreview && (
                   <div className="mt-4">
                     <h4 className="text-sm font-medium text-gray-700 mb-2">Processed Image</h4>
                     <img 
-                      src={analysisResults.croppedImage} 
+                      src={analysisData.croppedImage} 
                       alt="Processed" 
                       className="w-full rounded-lg shadow-md"
                     />
@@ -210,26 +301,32 @@ export default function AnalysisPage() {
               <div className="space-y-3">
                 <div className="flex justify-between">
                   <span className="text-gray-600">Skin Condition</span>
-                  <span className="font-medium">{analysisResults.skinCondition || 'Unknown'}</span>
+                  <span className="font-medium">{analysisData.skinCondition || 'Unknown'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Severity</span>
-                  <span className={`px-2 py-1 rounded-full text-sm font-medium ${getSeverityColor(analysisResults.severity)}`}>
-                    {analysisResults.severity || 'Unknown'}
+                  <span className={`px-2 py-1 rounded-full text-sm font-medium ${getSeverityColor(analysisData.severity)}`}>
+                    {analysisData.severity || 'Unknown'}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Confidence</span>
-                  <span className="font-medium">{analysisResults.confidence || 0}%</span>
+                  <span className="font-medium">{analysisData.confidence || 0}%</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Skin Type</span>
-                  <span className="font-medium">{analysisResults.skinType || 'Unknown'}</span>
+                  <span className="font-medium">{analysisData.skinType || 'Unknown'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Skin Tone</span>
-                  <span className="font-medium">{analysisResults.skinTone || 'Unknown'}</span>
+                  <span className="font-medium">{analysisData.skinTone || 'Unknown'}</span>
                 </div>
+                {analysisData.processing_time && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Processing Time</span>
+                    <span className="font-medium">{analysisData.processing_time}s</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -267,30 +364,30 @@ export default function AnalysisPage() {
                       <h4 className="text-lg font-semibold text-gray-900 mb-3">Detection Status</h4>
                       <div className="bg-gray-50 rounded-lg p-4">
                         <div className="flex items-center gap-3 mb-2">
-                          {analysisResults.faceDetected ? (
+                          {analysisData.faceDetected ? (
                             <div className="w-3 h-3 bg-green-500 rounded-full"></div>
                           ) : (
                             <div className="w-3 h-3 bg-red-500 rounded-full"></div>
                           )}
                           <span className="font-medium">
-                            {analysisResults.faceDetected ? 'Face Successfully Detected' : 'No Face Detected'}
+                            {analysisData.faceDetected ? 'Face Successfully Detected' : 'No Face Detected'}
                           </span>
                         </div>
-                        {analysisResults.detectionMessage && (
-                          <p className="text-sm text-gray-600 ml-6">{analysisResults.detectionMessage}</p>
+                        {analysisData.detectionMessage && (
+                          <p className="text-sm text-gray-600 ml-6">{analysisData.detectionMessage}</p>
                         )}
-                        {analysisResults.detectionMethod && (
-                          <p className="text-sm text-gray-500 ml-6">Method: {analysisResults.detectionMethod}</p>
+                        {analysisData.detectionMethod && (
+                          <p className="text-sm text-gray-500 ml-6">Method: {analysisData.detectionMethod}</p>
                         )}
                       </div>
                     </div>
 
                     {/* Affected Areas */}
-                    {analysisResults.affectedAreas && analysisResults.affectedAreas.length > 0 && (
+                    {analysisData.affectedAreas && analysisData.affectedAreas.length > 0 && (
                       <div>
                         <h4 className="text-lg font-semibold text-gray-900 mb-3">Analysis Areas</h4>
                         <div className="space-y-3">
-                          {analysisResults.affectedAreas.map((area, index) => (
+                          {analysisData.affectedAreas.map((area, index) => (
                             <div key={index} className="bg-gray-50 rounded-lg p-4">
                               <div className="flex justify-between items-center mb-2">
                                 <span className="font-medium">{area.area}</span>
@@ -323,12 +420,12 @@ export default function AnalysisPage() {
                   <div className="space-y-6">
                     <h4 className="text-lg font-semibold text-gray-900">Skin Analysis Metrics</h4>
                     
-                    {analysisResults.metrics && Object.keys(analysisResults.metrics).length > 0 ? (
+                    {analysisData.metrics && Object.keys(analysisData.metrics).length > 0 ? (
                       <div className="grid md:grid-cols-3 gap-4">
-                        {Object.entries(analysisResults.metrics).map(([key, value]) => (
+                        {Object.entries(analysisData.metrics).map(([key, value]) => (
                           <div key={key} className="bg-gray-50 rounded-lg p-4 text-center">
                             <div className="text-2xl font-bold text-blue-600 mb-1">{value}%</div>
-                            <div className="text-sm text-gray-600 capitalize">{key}</div>
+                            <div className="text-sm text-gray-600 capitalize">{key.replace(/_/g, ' ')}</div>
                             <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
                               <div 
                                 className="bg-blue-600 h-2 rounded-full"
@@ -348,11 +445,14 @@ export default function AnalysisPage() {
                     <div className="bg-blue-50 rounded-lg p-4">
                       <h5 className="font-medium text-blue-900 mb-2">Analysis Details</h5>
                       <div className="text-sm text-blue-800 space-y-1">
-                        <p>• Texture Assessment: {analysisResults.texture || 'Unknown'}</p>
-                        <p>• Overall Condition: {analysisResults.skinCondition || 'Unknown'}</p>
-                        <p>• Confidence Level: {analysisResults.confidence || 0}%</p>
-                        {analysisResults.geminiSuccess !== undefined && (
-                          <p>• AI Processing: {analysisResults.geminiSuccess ? 'Successful' : 'Limited'}</p>
+                        <p>• Texture Assessment: {analysisData.texture || 'Unknown'}</p>
+                        <p>• Overall Condition: {analysisData.skinCondition || 'Unknown'}</p>
+                        <p>• Confidence Level: {analysisData.confidence || 0}%</p>
+                        {analysisData.geminiSuccess !== undefined && (
+                          <p>• AI Processing: {analysisData.geminiSuccess ? 'Successful' : 'Limited'}</p>
+                        )}
+                        {analysisData.processing_time && (
+                          <p>• Processing Time: {analysisData.processing_time} seconds</p>
                         )}
                       </div>
                     </div>
@@ -364,9 +464,9 @@ export default function AnalysisPage() {
                   <div className="space-y-6">
                     <h4 className="text-lg font-semibold text-gray-900">AI Recommendations</h4>
                     
-                    {analysisResults.recommendations && analysisResults.recommendations.length > 0 ? (
+                    {analysisData.recommendations && analysisData.recommendations.length > 0 ? (
                       <div className="space-y-3">
-                        {analysisResults.recommendations.map((rec, index) => (
+                        {analysisData.recommendations.map((rec, index) => (
                           <div key={index} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
                             <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
                               <span className="text-blue-600 text-sm font-medium">{index + 1}</span>
@@ -382,13 +482,13 @@ export default function AnalysisPage() {
                     )}
 
                     {/* Photo Guidance for failed detections */}
-                    {analysisResults.photoGuidance && (
+                    {analysisData.photoGuidance && (
                       <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                         <h5 className="font-medium text-yellow-900 mb-3">📸 Photo Guidelines</h5>
                         <div className="space-y-2 text-sm text-yellow-800">
-                          {Object.entries(analysisResults.photoGuidance).map(([key, value]) => (
+                          {Object.entries(analysisData.photoGuidance).map(([key, value]) => (
                             <div key={key}>
-                              <span className="font-medium capitalize">{key}:</span> {value}
+                              <span className="font-medium capitalize">{key.replace(/_/g, ' ')}:</span> {value}
                             </div>
                           ))}
                         </div>
@@ -396,13 +496,13 @@ export default function AnalysisPage() {
                     )}
 
                     {/* Product Suggestions */}
-                    {analysisResults.productSuggestions && (
+                    {analysisData.productSuggestions && Object.keys(analysisData.productSuggestions).length > 0 && (
                       <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                         <h5 className="font-medium text-green-900 mb-3">🛍️ Product Suggestions</h5>
                         <div className="space-y-2 text-sm text-green-800">
-                          {Object.entries(analysisResults.productSuggestions).map(([key, value]) => (
+                          {Object.entries(analysisData.productSuggestions).map(([key, value]) => (
                             <div key={key}>
-                              <span className="font-medium capitalize">{key}:</span> {value}
+                              <span className="font-medium capitalize">{key.replace(/_/g, ' ')}:</span> {value}
                             </div>
                           ))}
                         </div>
@@ -410,11 +510,11 @@ export default function AnalysisPage() {
                     )}
 
                     {/* Lifestyle Tips */}
-                    {analysisResults.lifestyleTips && analysisResults.lifestyleTips.length > 0 && (
+                    {analysisData.lifestyleTips && analysisData.lifestyleTips.length > 0 && (
                       <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
                         <h5 className="font-medium text-purple-900 mb-3">💡 Lifestyle Tips</h5>
                         <div className="space-y-1 text-sm text-purple-800">
-                          {analysisResults.lifestyleTips.map((tip, index) => (
+                          {analysisData.lifestyleTips.map((tip, index) => (
                             <div key={index}>• {tip}</div>
                           ))}
                         </div>
@@ -428,9 +528,9 @@ export default function AnalysisPage() {
                   <div className="space-y-6">
                     <h4 className="text-lg font-semibold text-gray-900">Treatment Plan</h4>
                     
-                    {analysisResults.treatmentPlan && Object.keys(analysisResults.treatmentPlan).length > 0 ? (
+                    {analysisData.treatmentPlan && Object.keys(analysisData.treatmentPlan).length > 0 ? (
                       <div className="space-y-4">
-                        {Object.entries(analysisResults.treatmentPlan).map(([phase, description], index) => (
+                        {Object.entries(analysisData.treatmentPlan).map(([phase, description], index) => (
                           <div key={phase} className="border border-gray-200 rounded-lg p-4">
                             <div className="flex items-center gap-3 mb-2">
                               <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
@@ -468,18 +568,10 @@ export default function AnalysisPage() {
                   New Analysis
                 </button>
                 
+                {/* ✅ ปุ่ม Generate Report */}
                 <button
-                  onClick={() => {
-                    const analysisReport = {
-                      ...analysisResults,
-                      generatedAt: new Date().toISOString()
-                    };
-                    // ✅ ใช้ sessionStorage แทน localStorage
-                    sessionStorage.setItem('skinai_report_data', JSON.stringify(analysisReport));
-                    router.push('/report');
-                  }}
+                  onClick={generateReport}
                   className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 flex items-center gap-2"
-                  disabled={!analysisResults.faceDetected}
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -496,6 +588,18 @@ export default function AnalysisPage() {
                   </svg>
                   View History
                 </button>
+
+                {/* Debug Info (แสดงในโหมด Development) */}
+                {process.env.NODE_ENV === 'development' && (
+                  <details className="w-full mt-4">
+                    <summary className="cursor-pointer text-sm text-gray-500 hover:text-gray-700">
+                      🔍 Debug Info
+                    </summary>
+                    <pre className="mt-2 p-3 bg-gray-100 rounded text-xs overflow-auto max-h-40">
+                      {JSON.stringify(analysisData, null, 2)}
+                    </pre>
+                  </details>
+                )}
               </div>
             </div>
           </div>

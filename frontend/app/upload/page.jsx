@@ -15,6 +15,9 @@ export default function UploadPage() {
   const fileInputRef = useRef(null);
   const router = useRouter();
 
+  // 🔧 ตั้งค่า API Base URL
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
+
   const handleFileSelect = (file) => {
     if (!file) return;
 
@@ -24,9 +27,9 @@ export default function UploadPage() {
       return;
     }
 
-    // Validate file size (10MB limit)
-    if (file.size > 10 * 1024 * 1024) {
-      setError('File size must be less than 10MB');
+    // Validate file size (15MB limit)
+    if (file.size > 15 * 1024 * 1024) {
+      setError('File size must be less than 15MB');
       return;
     }
 
@@ -88,65 +91,102 @@ export default function UploadPage() {
 
     try {
       const formData = new FormData();
-      formData.append('image', selectedFile);
+      // ✅ แก้ไข: ใช้ 'file' ตรงตาม Backend API
+      formData.append('file', selectedFile);
+      
+      // ✅ เพิ่ม optional parameters
+      formData.append('enable_advanced', 'true');
 
       // Progress simulation
       const progressInterval = setInterval(() => {
-        setProgress(prev => Math.min(prev + 10, 90));
-      }, 200);
+        setProgress(prev => Math.min(prev + 5, 85));
+      }, 300);
 
-      console.log('📤 Uploading to /api/upload...');
+      console.log('📤 Uploading to:', `${API_BASE_URL}/api/upload`);
+      console.log('📦 File details:', {
+        name: selectedFile.name,
+        size: selectedFile.size,
+        type: selectedFile.type
+      });
       
-      const response = await fetch('/api/upload', {
+      // ✅ API Call with proper error handling
+      const response = await fetch(`${API_BASE_URL}/api/upload`, {
         method: 'POST',
         body: formData,
+        // ✅ ไม่ต้องกำหนด Content-Type ให้ browser จัดการ multipart/form-data
+        headers: {
+          'Accept': 'application/json',
+        },
       });
 
       clearInterval(progressInterval);
-      setProgress(100);
+      setProgress(95);
 
       console.log('📥 Response status:', response.status);
       
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        console.error('❌ Error response:', errorText);
+        
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { error: `HTTP ${response.status}: ${errorText}` };
+        }
+        
+        // ✅ จัดการ error message ที่ดีขึ้น
+        let errorMessage = 'Upload failed';
+        if (errorData.detail && Array.isArray(errorData.detail)) {
+          // FastAPI validation error
+          const validationErrors = errorData.detail.map(err => `${err.loc.join('.')}: ${err.msg}`);
+          errorMessage = `Validation Error: ${validationErrors.join(', ')}`;
+        } else if (errorData.error) {
+          errorMessage = errorData.error;
+        } else if (errorData.detail) {
+          errorMessage = errorData.detail;
+        }
+        
+        throw new Error(errorMessage);
       }
 
       const result = await response.json();
       console.log('✅ Upload successful:', result);
+      setProgress(100);
 
-      if (result.success && result.analysisResults) {
-        // ✅ ใช้ sessionStorage และลบรูปภาพออกเพื่อประหยัดพื้นที่
-        const uploadData = {
-          ...result.analysisResults,
-          // ❌ ไม่เก็บ base64 images ที่ใหญ่
-          originalImage: null,
-          croppedImage: null,
-          // ✅ เก็บข้อมูลสำคัญเท่านั้น
-          hasImage: true, // flag ว่ามีรูป
-          name: selectedFile.name,
-          size: selectedFile.size,
-          type: selectedFile.type,
-          uploadTime: new Date().toISOString()
+      // รอให้ progress bar เต็ม
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      if (result.success) {
+        // ✅ บันทึกข้อมูลลง sessionStorage พร้อม analysisId
+        const analysisData = {
+          ...result,
+          // ✅ ตรวจสอบว่ามี analysisId หรือไม่
+          analysisId: result.analysisId || result.analysisResults?.analysisId || `analysis_${Date.now()}`,
+          fileInfo: {
+            name: selectedFile.name,
+            size: selectedFile.size,
+            type: selectedFile.type,
+            uploadTime: new Date().toISOString()
+          }
         };
         
         try {
-          // ✅ ใช้ sessionStorage แทน localStorage
-          sessionStorage.setItem('skinai_last_upload', JSON.stringify(uploadData));
-          console.log('✅ Data saved to sessionStorage (without images)');
+          sessionStorage.setItem('skinai_analysis_result', JSON.stringify(analysisData));
+          console.log('✅ Analysis data saved with ID:', analysisData.analysisId);
           
-          // เก็บ preview URL แยก (ชั่วคราว)
+          // เก็บ preview URL
           if (previewUrl) {
             sessionStorage.setItem('skinai_preview_url', previewUrl);
           }
           
         } catch (storageError) {
           console.warn('⚠️ Storage error:', storageError);
-          // ถ้า sessionStorage ก็เต็ม ก็ข้ามไป (ข้อมูลจะส่งผ่าน memory)
         }
         
-        // Redirect to analysis page
+        // ✅ Redirect to analysis page
         router.push('/analysis');
+        
       } else {
         throw new Error(result.error || 'Analysis failed');
       }
@@ -166,7 +206,7 @@ export default function UploadPage() {
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-800 mb-2">
-            AI Skin Analysis
+            🔬 AI Skin Analysis
           </h1>
           <p className="text-gray-600">
             Upload a clear photo of your face for AI-powered skin analysis
@@ -225,7 +265,7 @@ export default function UploadPage() {
                       Choose or drag your photo here
                     </p>
                     <p className="text-sm text-gray-500 mb-4">
-                      Supports JPG, PNG, WebP • Max 10MB
+                      Supports JPG, PNG, WebP, GIF, BMP • Max 15MB
                     </p>
                     <button
                       type="button"
@@ -260,12 +300,17 @@ export default function UploadPage() {
             {uploading && (
               <div className="space-y-2">
                 <div className="flex justify-between text-sm text-gray-600">
-                  <span>Analyzing your photo...</span>
+                  <span>
+                    {progress < 30 ? 'Uploading image...' :
+                     progress < 60 ? 'Detecting face...' :
+                     progress < 90 ? 'Analyzing skin...' :
+                     'Generating recommendations...'}
+                  </span>
                   <span>{progress}%</span>
                 </div>
                 <div className="w-full bg-gray-200 rounded-full h-2">
                   <div
-                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                    className="bg-gradient-to-r from-blue-500 to-green-500 h-2 rounded-full transition-all duration-300"
                     style={{ width: `${progress}%` }}
                   />
                 </div>
@@ -287,42 +332,52 @@ export default function UploadPage() {
               {uploading ? (
                 <div className="flex items-center justify-center space-x-2">
                   <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Analyzing...</span>
+                  <span>Analyzing with AI...</span>
                 </div>
               ) : (
                 <div className="flex items-center justify-center space-x-2">
                   <Camera className="w-5 h-5" />
-                  <span>Start AI Analysis</span>
+                  <span>🚀 Start AI Analysis</span>
                 </div>
               )}
             </button>
           </form>
 
           {/* Tips */}
-          <div className="mt-8 p-6 bg-gray-50 rounded-xl">
-            <h3 className="font-semibold text-gray-800 mb-3">📸 Photo Tips for Best Results:</h3>
+          <div className="mt-8 p-6 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-100">
+            <h3 className="font-semibold text-gray-800 mb-3 flex items-center">
+              <span className="mr-2">📸</span>
+              Photo Tips for Best Results:
+            </h3>
             <ul className="text-sm text-gray-600 space-y-2">
               <li className="flex items-start space-x-2">
-                <span className="text-green-500 mt-0.5">•</span>
+                <span className="text-green-500 mt-0.5">✓</span>
                 <span>Use natural daylight or bright, even lighting</span>
               </li>
               <li className="flex items-start space-x-2">
-                <span className="text-green-500 mt-0.5">•</span>
+                <span className="text-green-500 mt-0.5">✓</span>
                 <span>Face the camera directly with your face centered</span>
               </li>
               <li className="flex items-start space-x-2">
-                <span className="text-green-500 mt-0.5">•</span>
+                <span className="text-green-500 mt-0.5">✓</span>
                 <span>Keep a neutral expression with eyes open</span>
               </li>
               <li className="flex items-start space-x-2">
-                <span className="text-green-500 mt-0.5">•</span>
+                <span className="text-green-500 mt-0.5">✓</span>
                 <span>Ensure the image is clear and not blurry</span>
               </li>
               <li className="flex items-start space-x-2">
-                <span className="text-green-500 mt-0.5">•</span>
+                <span className="text-green-500 mt-0.5">✓</span>
                 <span>Remove makeup for more accurate analysis</span>
               </li>
             </ul>
+          </div>
+
+          {/* API Status */}
+          <div className="mt-4 text-center">
+            <p className="text-xs text-gray-500">
+              🤖 Powered by AI • 🔒 Secure Processing • 📊 Advanced Analysis
+            </p>
           </div>
         </div>
       </div>

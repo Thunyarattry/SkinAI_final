@@ -12,6 +12,7 @@
     "dev:full": "npm run check-backend && npm run dev"
   },
   "dependencies": {
+    "@heroicons/react": "^2.2.0",
     "clsx": "2.1.1",
     "framer-motion": "11.3.30",
     "html2canvas": "1.4.1",
