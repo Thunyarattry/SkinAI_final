@@ -185,11 +185,32 @@ async def startup_event():
     logger.info("   • History: GET /api/history")
     logger.info("   • Documentation: /docs")
 
+# if __name__ == "__main__":
+#     import uvicorn
+    
+#     host = os.getenv("HOST", "0.0.0.0")
+#     # port = int(os.getenv("PORT", 5001))
+#     ORT = int(os.getenv("PORT", 8000))
+#     debug = os.getenv("DEBUG", "True").lower() == "true"
+    
+#     logger.info(f"🌐 Starting SkinAI Advanced Server on {host}:{port}")
+#     logger.info(f"🔧 Debug mode: {debug}")
+#     logger.info(f"🚀 Version: 2.2.0 with Topic-Specific Gemini AI")
+    
+#     uvicorn.run(
+#         "main:app",
+#         host=host,
+#         port=port,
+#         reload=debug,
+#         log_level="info",
+#         access_log=True,
+#         reload_dirs=["./"] if debug else None
+#     )
 if __name__ == "__main__":
     import uvicorn
     
     host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", 5001))
+    port = int(os.getenv("PORT", 8000))  # <-- แก้ตรงนี้
     debug = os.getenv("DEBUG", "True").lower() == "true"
     
     logger.info(f"🌐 Starting SkinAI Advanced Server on {host}:{port}")

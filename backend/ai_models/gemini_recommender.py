@@ -12,16 +12,18 @@ def setup_gemini():
     try:
         import google.generativeai as genai
         
-        api_key = (
-            os.getenv('GEMINI_API_KEY') or 
-            os.getenv('GOOGLE_API_KEY') or
-            "AIzaSyDQMvla98RH0xfwAguSbOgHLyQJVhvjBrQ"
-        )
-        
-        if not api_key:
-            return None, "API key not found"
-        
+        # api_key = (
+        #     os.getenv('GEMINI_API_KEY') or 
+        #     os.getenv('GOOGLE_API_KEY') or
+        #     "AIzaSyDQMvla98RH0xfwAguSbOgHLyQJVhvjBrQ"
+        # )
+        api_key = os.getenv('GEMINI_API_KEY') or "AIzaSyDQMvla98RH0xfwAguSbOgHLyQJVhvjBrQ"
         genai.configure(api_key=api_key)
+       
+        # if not api_key:
+        #     return None, "API key not found"
+        
+        # genai.configure(api_key=api_key)
         
         generation_config = {
             "temperature": 0.3,
@@ -30,11 +32,14 @@ def setup_gemini():
             "max_output_tokens": 2048,
         }
         
+        # model = genai.GenerativeModel(
+        #     'gemini-1.5-flash',
+        #     generation_config=generation_config
+        # )
         model = genai.GenerativeModel(
-            'gemini-1.5-flash',
+            'gemini-2.5-flash',
             generation_config=generation_config
-        )
-        
+        )       
         return model, None
         
     except ImportError:
@@ -168,3 +173,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

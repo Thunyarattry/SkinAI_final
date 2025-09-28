@@ -296,3 +296,4 @@ def generate_fallback_recommendations(analysis_data: dict) -> dict:
         "healthScore": health_score,
         "severity": severity
     }
+

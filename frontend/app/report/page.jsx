@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 const apiCall = async (endpoint, options = {}) => {
   const url = `${API_BASE_URL}${endpoint}`;
@@ -66,63 +66,157 @@ const getGeminiStatus = () => {
   return apiCall("/api/gemini/status");
 };
 
-// ✅ Helper function to normalize data structure
+// 🎨 Helper Functions
+const getIssueLabel = (issue) => {
+  const issueMap = {
+    acne: "สิว",
+    blemishes: "สิว",
+    texture_variation: "ผิวขรุขระ",
+    redness: "ผิวแดง",
+    dark_spots: "จุดด่างดำ",
+    wrinkles: "ริ้วรอย",
+    dryness: "ผิวแห้ง",
+    oiliness: "ผิวมัน",
+    pores: "รูขุมขน",
+    blackheads: "หัวดำ",
+    whiteheads: "หัวขาว",
+  };
+  return issueMap[issue?.toLowerCase()] || issue;
+};
+
+const getHealthCategoryLabel = (category) => {
+  const categoryMap = {
+    excellent: "ดีเยี่ยม",
+    good: "ดี",
+    fair: "พอใช้",
+    needs_attention: "ต้องดูแล",
+    poor: "แย่",
+    mild: "เล็กน้อย",
+    moderate: "ปานกลาง",
+    severe: "รุนแรง",
+  };
+  return categoryMap[category?.toLowerCase()] || category;
+};
+
+// ✅ Helper function to normalize data structure - แก้ไขใหม่
 const normalizeReportData = (rawData) => {
   // ถ้าเป็น structure ใหม่ (จาก upload API)
   if (rawData.skinAnalysis && rawData.recommendations) {
     const skinAnalysis = rawData.skinAnalysis;
     const recommendations = rawData.recommendations;
 
+    // ✅ แก้ไขการดึงข้อมูล skin_type
+    const getSkinType = () => {
+      // ลองหาจากหลายที่
+      if (recommendations?.clinicalDiagnosis?.skinType) {
+        return recommendations.clinicalDiagnosis.skinType;
+      }
+      if (skinAnalysis?.detection_details?.skin_type) {
+        return skinAnalysis.detection_details.skin_type;
+      }
+      if (recommendations?.skinType) {
+        return recommendations.skinType;
+      }
+      if (skinAnalysis?.skin_type) {
+        return skinAnalysis.skin_type;
+      }
+      return "ไม่ระบุ";
+    };
+
+    // ✅ แก้ไขการดึงข้อมูล severity
+    const getSeverity = () => {
+      if (recommendations?.clinicalDiagnosis?.severityLevel) {
+        return recommendations.clinicalDiagnosis.severityLevel;
+      }
+      if (skinAnalysis?.overall_health?.health_category) {
+        return skinAnalysis.overall_health.health_category;
+      }
+      if (recommendations?.severity) {
+        return recommendations.severity;
+      }
+      if (skinAnalysis?.severity_level) {
+        return skinAnalysis.severity_level;
+      }
+      return "ไม่ทราบ";
+    };
+
+    // ✅ แก้ไขการดึงข้อมูล primary_condition
+    const getPrimaryCondition = () => {
+      if (recommendations?.clinicalDiagnosis?.primaryConditions?.length > 0) {
+        return recommendations.clinicalDiagnosis.primaryConditions[0];
+      }
+      if (skinAnalysis?.detectedIssues?.length > 0) {
+        return getIssueLabel(skinAnalysis.detectedIssues[0]);
+      }
+      if (recommendations?.conditionAssessment) {
+        return recommendations.conditionAssessment;
+      }
+      return "ผิวปกติ";
+    };
+
+    // ✅ แก้ไขการคำนวณ confidence
+    const getConfidence = () => {
+      if (skinAnalysis?.overall_health?.health_score) {
+        return skinAnalysis.overall_health.health_score;
+      }
+      if (skinAnalysis?.total_detections && skinAnalysis.total_detections <= 100) {
+        return skinAnalysis.total_detections;
+      }
+      if (skinAnalysis?.confidence_score) {
+        return skinAnalysis.confidence_score * 100;
+      }
+      return 75; // default confidence
+    };
+
     return {
       analysisId: rawData.analysisId,
       created_at: rawData.timestamp,
 
-      // ✅ Normalize skin analysis
+      // ✅ Normalize skin analysis - แก้ไขใหม่
       skin_analysis: {
-        skin_type: recommendations.skinType || "Unknown",
-        primary_condition: recommendations.conditionAssessment || "Unknown",
-        severity_level: recommendations.severity || "unknown",
-        confidence_score: (skinAnalysis.total_detections || 0) / 100,
-        confidence: skinAnalysis.total_detections || 0,
+        skin_type: getSkinType(),
+        primary_condition: getPrimaryCondition(),
+        severity_level: getSeverity(),
+        confidence_score: getConfidence() / 100,
+        confidence: getConfidence(),
         conditions: skinAnalysis.detectionCounts || {},
         details: `ตรวจพบปัญหา ${
           skinAnalysis.detectedIssues?.length || 0
         } ประเภท: ${skinAnalysis.detectedIssues?.join(", ") || "ไม่มี"}`,
-        analysis_method: skinAnalysis.analysis_method || "Advanced Analysis",
+        analysis_method: skinAnalysis.analysis_method || "Enhanced Analysis",
         detected_issues: skinAnalysis.detectedIssues || [],
         detection_counts: skinAnalysis.detectionCounts || {},
-        overall_health: skinAnalysis.overall_health || {},
+        overall_health: skinAnalysis.overall_health || {
+          health_score: getConfidence(),
+          health_category: getSeverity()
+        },
       },
 
       // ✅ Normalize recommendations
       recommendations: {
-        skincare_routine: recommendations.skincareRecommendations || [],
+        skincare_routine: recommendations.skincareRecommendations || 
+          recommendations.treatmentPlan?.immediateAction || [],
         products: recommendations.productRecommendations
           ? [
               {
-                name:
-                  recommendations.productRecommendations.cleanser ||
-                  "ผลิตภัณฑ์ทำความสะอาด",
+                name: recommendations.productRecommendations.cleanser || "ผลิตภัณฑ์ทำความสะอาด",
                 type: "Cleanser",
                 reason: "สำหรับทำความสะอาดผิว",
               },
               {
-                name:
-                  recommendations.productRecommendations.treatment ||
-                  "ผลิตภัณฑ์รักษา",
+                name: recommendations.productRecommendations.treatment || "ผลิตภัณฑ์รักษา",
                 type: "Treatment",
                 reason: "สำหรับรักษาปัญหาผิว",
               },
               {
-                name:
-                  recommendations.productRecommendations.moisturizer ||
-                  "ครีมบำรุง",
+                name: recommendations.productRecommendations.moisturizer || "ครีมบำรุง",
                 type: "Moisturizer",
                 reason: "สำหรับบำรุงผิว",
               },
             ]
           : [],
-        tips: recommendations.lifestyleRecommendations || [],
+        tips: recommendations.lifestyleRecommendations || 
+          recommendations.lifestyleModifications?.dietary || [],
       },
 
       // ✅ Images
@@ -134,7 +228,7 @@ const normalizeReportData = (rawData) => {
         : null,
       face_detected: rawData.faceDetection?.detected || false,
 
-      // ✅ Gemini recommendations (ใหม่)
+      // ✅ Gemini recommendations
       gemini_recommendations: rawData.geminiSuccess ? recommendations : null,
       gemini_success: rawData.geminiSuccess || false,
       gemini_error: rawData.geminiError || null,
@@ -143,6 +237,160 @@ const normalizeReportData = (rawData) => {
 
   // ถ้าเป็น structure เก่า (จาก report API)
   return rawData;
+};
+
+// 🎨 Skin Type Badge Component - แก้ไขใหม่
+const SkinTypeBadge = ({ type, confidence }) => {
+  const getTypeInfo = (type) => {
+    // ✅ แก้ไขการ mapping ให้ครอบคลุมมากขึ้น
+    const typeMap = {
+      dry: {
+        color: "bg-yellow-100 text-yellow-800",
+        icon: "🏜️",
+        label: "ผิวแห้ง",
+      },
+      oily: { 
+        color: "bg-blue-100 text-blue-800", 
+        icon: "💧", 
+        label: "ผิวมัน" 
+      },
+      combination: {
+        color: "bg-purple-100 text-purple-800",
+        icon: "🌓",
+        label: "ผิวผสม",
+      },
+      sensitive: {
+        color: "bg-red-100 text-red-800",
+        icon: "🌸",
+        label: "ผิวแพ้ง่าย",
+      },
+      normal: {
+        color: "bg-green-100 text-green-800",
+        icon: "✨",
+        label: "ผิวปกติ",
+      },
+      // ✅ เพิ่ม mapping สำหรับค่าจาก backend
+      "normal to combination": {
+        color: "bg-purple-100 text-purple-800",
+        icon: "🌓",
+        label: "ผิวปกติถึงผสม",
+      },
+      "normal_to_dry": {
+        color: "bg-yellow-100 text-yellow-800",
+        icon: "🏜️",
+        label: "ผิวปกติถึงแห้ง",
+      },
+      "combination_oily": {
+        color: "bg-blue-100 text-blue-800",
+        icon: "💧",
+        label: "ผิวผสมมัน",
+      },
+      unknown: {
+        color: "bg-gray-100 text-gray-800",
+        icon: "❓",
+        label: "ไม่ระบุ",
+      }
+    };
+    
+    // ✅ ตรวจสอบค่าที่ได้รับ
+    const normalizedType = type?.toString().toLowerCase().trim();
+    return typeMap[normalizedType] || {
+      color: "bg-gray-100 text-gray-800",
+      icon: "❓",
+      label: type || "ไม่ระบุ",
+    };
+  };
+
+  const typeInfo = getTypeInfo(type);
+  
+  // ✅ แก้ไขการแสดง confidence
+  const displayConfidence = () => {
+    if (typeof confidence === 'number' && confidence > 0 && confidence <= 100) {
+      return `(${Math.round(confidence)}%)`;
+    }
+    if (typeof confidence === 'number' && confidence > 100) {
+      // ถ้าค่ามากกว่า 100 อาจเป็น raw score ให้หารด้วย 100
+      return `(${Math.round(confidence / 100)}%)`;
+    }
+    return ''; // ไม่แสดงถ้าไม่มีค่าที่เหมาะสม
+  };
+
+  return (
+    <span
+      className={`inline-flex items-center px-3 py-2 rounded-full text-sm font-medium ${typeInfo.color}`}
+    >
+      <span className="mr-2">{typeInfo.icon}</span>
+      {typeInfo.label}
+      <span className="ml-2 text-xs opacity-75">
+        {displayConfidence()}
+      </span>
+    </span>
+  );
+};
+
+// 🎨 Severity Badge Component - แก้ไขใหม่
+const SeverityBadge = ({ severity }) => {
+  const getSeverityInfo = (severity) => {
+    const severityMap = {
+      good: { color: "bg-green-100 text-green-800", icon: "✅", label: "ดี" },
+      excellent: { color: "bg-green-100 text-green-800", icon: "✅", label: "ดีเยี่ยม" },
+      mild: {
+        color: "bg-yellow-100 text-yellow-800",
+        icon: "⚠️",
+        label: "เล็กน้อย",
+      },
+      moderate: {
+        color: "bg-orange-100 text-orange-800",
+        icon: "🔶",
+        label: "ปานกลาง",
+      },
+      severe: { 
+        color: "bg-red-100 text-red-800", 
+        icon: "🔴", 
+        label: "รุนแรง" 
+      },
+      // ✅ เพิ่ม mapping สำหรับค่าจาก backend
+      "needs_attention": {
+        color: "bg-orange-100 text-orange-800",
+        icon: "🔶",
+        label: "ต้องดูแล",
+      },
+      fair: {
+        color: "bg-yellow-100 text-yellow-800",
+        icon: "⚠️",
+        label: "พอใช้",
+      },
+      poor: {
+        color: "bg-red-100 text-red-800",
+        icon: "🔴",
+        label: "แย่",
+      },
+      unknown: {
+        color: "bg-gray-100 text-gray-800",
+        icon: "❓",
+        label: "ไม่ทราบ",
+      },
+    };
+    
+    // ✅ ตรวจสอบค่าที่ได้รับ
+    const normalizedSeverity = severity?.toString().toLowerCase().trim();
+    return severityMap[normalizedSeverity] || {
+      color: "bg-gray-100 text-gray-800",
+      icon: "❓",
+      label: severity || "ไม่ระบุ",
+    };
+  };
+
+  const severityInfo = getSeverityInfo(severity);
+
+  return (
+    <span
+      className={`inline-flex items-center px-3 py-2 rounded-full text-sm font-medium ${severityInfo.color}`}
+    >
+      <span className="mr-2">{severityInfo.icon}</span>
+      {severityInfo.label}
+    </span>
+  );
 };
 
 export default function ReportPage() {
@@ -446,139 +694,7 @@ export default function ReportPage() {
           </div>
         </div>
 
-        {/* Analysis Images */}
-        <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">
-            📸 รูปภาพที่วิเคราะห์
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Original Image */}
-            {reportData?.image_url && (
-              <div>
-                <h3 className="text-sm font-medium text-gray-700 mb-2">
-                  รูปต้นฉบับ
-                </h3>
-                <img
-                  src={reportData.image_url}
-                  alt="Original analysis image"
-                  className="w-full rounded-lg shadow-md"
-                  onError={(e) => {
-                    e.target.style.display = "none";
-                  }}
-                />
-              </div>
-            )}
-
-            {/* Cropped Image */}
-            {reportData?.cropped_image_url && (
-              <div>
-                <h3 className="text-sm font-medium text-gray-700 mb-2">
-                  ใบหน้าที่ตัดออกมา
-                </h3>
-                <img
-                  src={reportData.cropped_image_url}
-                  alt="Cropped face"
-                  className="w-full rounded-lg shadow-md"
-                  onError={(e) => {
-                    e.target.style.display = "none";
-                  }}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Skin Analysis */}
-        {reportData?.skin_analysis && (
-          <div className="bg-white rounded-lg shadow p-6 mb-6">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">
-              🔍 ผลการวิเคราะห์ผิว
-            </h2>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Skin Type */}
-              <div>
-                <h3 className="font-medium text-gray-700 mb-2">ประเภทผิว</h3>
-                <SkinTypeBadge
-                  type={reportData.skin_analysis.skin_type}
-                  confidence={reportData.skin_analysis.confidence}
-                />
-              </div>
-
-              {/* Primary Condition */}
-              <div>
-                <h3 className="font-medium text-gray-700 mb-2">สภาพผิวหลัก</h3>
-                <div className="flex items-center gap-2">
-                  <span className="px-3 py-2 bg-blue-100 text-blue-800 rounded-lg text-sm font-medium">
-                    {reportData.skin_analysis.primary_condition}
-                  </span>
-                  <span className="text-sm text-gray-500">
-                    (
-                    {Math.round(
-                      (reportData.skin_analysis.confidence_score || 0) * 100
-                    )}
-                    %)
-                  </span>
-                </div>
-              </div>
-
-              {/* Severity Level */}
-              <div>
-                <h3 className="font-medium text-gray-700 mb-2">
-                  ระดับความรุนแรง
-                </h3>
-                <SeverityBadge
-                  severity={reportData.skin_analysis.severity_level}
-                />
-              </div>
-
-              {/* Analysis Method */}
-              <div>
-                <h3 className="font-medium text-gray-700 mb-2">
-                  วิธีการวิเคราะห์
-                </h3>
-                <span className="text-sm text-gray-600">
-                  {reportData.skin_analysis.analysis_method ||
-                    "Standard Analysis"}
-                </span>
-              </div>
-            </div>
-
-            {/* ✅ Detected Issues (ใหม่) */}
-            {reportData.skin_analysis.detected_issues &&
-              reportData.skin_analysis.detected_issues.length > 0 && (
-                <div className="mt-6">
-                  <h3 className="font-medium text-gray-700 mb-3">
-                    ปัญหาผิวที่ตรวจพบ
-                  </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    {reportData.skin_analysis.detected_issues.map(
-                      (issue, index) => {
-                        const count =
-                          reportData.skin_analysis.detection_counts?.[issue] ||
-                          0;
-                        return (
-                          <div
-                            key={index}
-                            className="flex justify-between items-center p-3 bg-red-50 border border-red-200 rounded"
-                          >
-                            <span className="text-sm text-red-800 capitalize font-medium">
-                              {getIssueLabel(issue)}
-                            </span>
-                            {count > 0 && (
-                              <span className="px-2 py-1 bg-red-100 text-red-800 rounded text-xs font-medium">
-                                {count} จุด
-                              </span>
-                            )}
-                          </div>
-                        );
-                      }
-                    )}
-                  </div>
-                </div>
-              )}
-
-            {/* ✅ Health Score (ใหม่) */}
+            {/* ✅ Health Score (ใหม่)
             {reportData.skin_analysis.overall_health && (
               <div className="mt-6 p-4 bg-gray-50 rounded">
                 <h3 className="font-medium text-gray-700 mb-2">
@@ -616,9 +732,9 @@ export default function ReportPage() {
                   )}
                 </p>
               </div>
-            )}
+            )} */}
 
-            {/* Analysis Details */}
+            {/* Analysis Details
             {reportData.skin_analysis.details && (
               <div className="mt-4 p-4 bg-gray-50 rounded">
                 <h3 className="font-medium text-gray-700 mb-2">รายละเอียด</h3>
@@ -627,8 +743,8 @@ export default function ReportPage() {
                 </p>
               </div>
             )}
-          </div>
-        )}
+          </div> */}
+        {/* )} */}
 
         {/* ✅ Gemini AI Recommendations - รองรับ Structure ใหม่ */}
         {(geminiRecommendations || reportData?.gemini_recommendations) && (
@@ -1016,7 +1132,7 @@ export default function ReportPage() {
           </p>
           <p className="text-xs text-gray-500">
             คำแนะนำในรายงานนี้เป็นเพียงข้อมูลเบื้องต้น
-            ควรปรึกษาผู้เชี่ยวชาญด้านผิวหนัง
+            ควรปรึกษาผู้เชี่ยวชaญด้านผิวหนัง
           </p>
           <div className="mt-3 text-xs text-gray-400">
             {new Date().toLocaleDateString("th-TH")} • ข้อมูลเฉพาะบุคคล
@@ -1024,119 +1140,4 @@ export default function ReportPage() {
         </div>
       </div>
     </div>
-  );
-}
-
-// 🎨 Helper Functions
-const getIssueLabel = (issue) => {
-  const issueMap = {
-    acne: "สิว",
-    texture_variation: "ผิวขรุขระ",
-    redness: "ผิวแดง",
-    dark_spots: "จุดด่างดำ",
-    wrinkles: "ริ้วรอย",
-    dryness: "ผิวแห้ง",
-    oiliness: "ผิวมัน",
-  };
-  return issueMap[issue] || issue;
-};
-
-const getHealthCategoryLabel = (category) => {
-  const categoryMap = {
-    excellent: "ดีเยี่ยม",
-    good: "ดี",
-    fair: "พอใช้",
-    needs_attention: "ต้องดูแล",
-    poor: "แย่",
-  };
-  return categoryMap[category] || category;
-};
-
-// 🎨 Skin Type Badge Component
-const SkinTypeBadge = ({ type, confidence }) => {
-  const getTypeInfo = (type) => {
-    const typeMap = {
-      dry: {
-        color: "bg-yellow-100 text-yellow-800",
-        icon: "🏜️",
-        label: "ผิวแห้ง",
-      },
-      oily: { color: "bg-blue-100 text-blue-800", icon: "💧", label: "ผิวมัน" },
-      combination: {
-        color: "bg-purple-100 text-purple-800",
-        icon: "🌓",
-        label: "ผิวผสม",
-      },
-      sensitive: {
-        color: "bg-red-100 text-red-800",
-        icon: "🌸",
-        label: "ผิวแพ้ง่าย",
-      },
-      normal: {
-        color: "bg-green-100 text-green-800",
-        icon: "✨",
-        label: "ผิวปกติ",
-      },
-    };
-    return (
-      typeMap[type?.toLowerCase()] || {
-        color: "bg-gray-100 text-gray-800",
-        icon: "❓",
-        label: type,
-      }
-    );
-  };
-
-  const typeInfo = getTypeInfo(type);
-
-  return (
-    <span
-      className={`inline-flex items-center px-3 py-2 rounded-full text-sm font-medium ${typeInfo.color}`}
-    >
-      <span className="mr-2">{typeInfo.icon}</span>
-      {typeInfo.label}
-      {confidence && (
-        <span className="ml-2 text-xs opacity-75">
-          ({Math.round(confidence * 100)}%)
-        </span>
-      )}
-    </span>
-  );
-};
-
-// 🎨 Severity Badge Component
-const SeverityBadge = ({ severity }) => {
-  const getSeverityInfo = (severity) => {
-    const severityMap = {
-      good: { color: "bg-green-100 text-green-800", icon: "✅", label: "ดี" },
-      mild: {
-        color: "bg-yellow-100 text-yellow-800",
-        icon: "⚠️",
-        label: "เล็กน้อย",
-      },
-      moderate: {
-        color: "bg-orange-100 text-orange-800",
-        icon: "🔶",
-        label: "ปานกลาง",
-      },
-      severe: { color: "bg-red-100 text-red-800", icon: "🔴", label: "รุนแรง" },
-      unknown: {
-        color: "bg-gray-100 text-gray-800",
-        icon: "❓",
-        label: "ไม่ทราบ",
-      },
-    };
-    return severityMap[severity?.toLowerCase()] || severityMap["unknown"];
-  };
-
-  const severityInfo = getSeverityInfo(severity);
-
-  return (
-    <span
-      className={`inline-flex items-center px-3 py-2 rounded-full text-sm font-medium ${severityInfo.color}`}
-    >
-      <span className="mr-2">{severityInfo.icon}</span>
-      {severityInfo.label}
-    </span>
-  );
-};
+  )}

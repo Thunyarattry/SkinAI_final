@@ -390,7 +390,7 @@ export default function AnalysisPage() {
             <div className="bg-white rounded-lg shadow-sm mb-6">
               <div className="border-b border-gray-200">
                 <nav className="flex space-x-8 px-6">
-                  {["overview", "analysis", "recommendations"].map((tab) => (
+                  {["overview", "recommendations"].map((tab) => (
                     <button
                       key={tab}
                       onClick={() => setActiveTab(tab)}
@@ -698,7 +698,7 @@ export default function AnalysisPage() {
                             <span className="font-medium">
                               Mean Color (RGB):
                             </span>
-                            <p className="text-gray-600">
+                            {/* <p className="text-gray-600">
                               R:
                               {Math.round(
                                 analysisData.faceDetection.face_analysis
@@ -714,7 +714,7 @@ export default function AnalysisPage() {
                                 analysisData.faceDetection.face_analysis
                                   .mean_color.b
                               )}
-                            </p>
+                            </p> */}
                           </div>
                         </div>
                       </div>
