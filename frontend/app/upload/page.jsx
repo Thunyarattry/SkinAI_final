@@ -16,7 +16,8 @@ export default function UploadPage() {
   const router = useRouter();
 
   // 🔧 ตั้งค่า API Base URL
-  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
+  //   const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+  const API_BASE_URL = '';
 
   const handleFileSelect = (file) => {
     if (!file) return;
@@ -96,6 +97,7 @@ export default function UploadPage() {
       
       // ✅ เพิ่ม optional parameters
       formData.append('enable_advanced', 'true');
+      formData.append('enable_gemini', 'true');
 
       // Progress simulation
       const progressInterval = setInterval(() => {
@@ -110,7 +112,7 @@ export default function UploadPage() {
       });
       
       // ✅ API Call with proper error handling
-      const response = await fetch(`${API_BASE_URL}/api/upload`, {
+      const response = await fetch(`/api/upload`, {
         method: 'POST',
         body: formData,
         // ✅ ไม่ต้องกำหนด Content-Type ให้ browser จัดการ multipart/form-data
@@ -158,11 +160,35 @@ export default function UploadPage() {
       await new Promise(resolve => setTimeout(resolve, 500));
 
       if (result.success) {
-        // ✅ บันทึกข้อมูลลง sessionStorage พร้อม analysisId
+        
+        const ar = result.analysisResults || {};
         const analysisData = {
           ...result,
-          // ✅ ตรวจสอบว่ามี analysisId หรือไม่
-          analysisId: result.analysisId || result.analysisResults?.analysisId || `analysis_${Date.now()}`,
+          analysisId: result.analysisId || ar.analysisId || `analysis_${Date.now()}`,
+
+          // 🔑 ดึง key ที่หน้า analysis ต้องใช้ขึ้นมาไว้ชั้นบน
+          originalImage: result.originalImage ?? ar.originalImage ?? null,
+          croppedImage:  result.croppedImage  ?? ar.croppedImage  ?? null,
+          timestamp:     result.timestamp     ?? ar.uploadTime    ?? new Date().toISOString(),
+
+          // ถ้า BE ให้ faceDetection มาแล้ว ใช้อันนั้น; ถ้าไม่ ให้สรุปจาก ar.faceDetected
+          faceDetection: result.faceDetection ?? (
+            ar.faceDetected
+              ? { detected: true, confidence: (ar.confidence ?? 0) / 100 }
+              : { detected: false }
+          ),
+
+          // โครงพื้นฐานของผลวิเคราะห์ ถ้า BE ยังไม่ได้ส่งแบบจัดรูปมา
+          skinAnalysis: result.skinAnalysis ?? {
+            overall_health: { health_score: 0, health_category: 'unknown' },
+            total_detections: 0,
+            detectedIssues: [],
+            detectionCounts: {},
+          },
+
+          // คำแนะนำ (ถ้ามีใน analysisResults ก็ยกมาด้วย)
+          recommendations: result.recommendations ?? ar.recommendations ?? [],
+          
           fileInfo: {
             name: selectedFile.name,
             size: selectedFile.size,
@@ -176,16 +202,16 @@ export default function UploadPage() {
           console.log('✅ Analysis data saved with ID:', analysisData.analysisId);
           
           // เก็บ preview URL
-          if (previewUrl) {
-            sessionStorage.setItem('skinai_preview_url', previewUrl);
-          }
+          if (previewUrl) sessionStorage.setItem('skinai_preview_url', previewUrl);
+          
+          
           
         } catch (storageError) {
           console.warn('⚠️ Storage error:', storageError);
         }
         
         // ✅ Redirect to analysis page
-        router.push('/analysis');
+        router.push(`/analysis?analysisId=${encodeURIComponent(analysisData.analysisId)}`);
         
       } else {
         throw new Error(result.error || 'Analysis failed');

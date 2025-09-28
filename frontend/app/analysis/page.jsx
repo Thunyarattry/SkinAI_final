@@ -2,6 +2,17 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
+// 👇 Base URL ของ BE (ใช้ env ได้ หรือ fallback 4000)
+const API_BASE_URL =
+  (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/+$/, "");
+
+// 👇 แปลงทั้ง path แบบ relative (/uploads/xxx.jpg) และ absolute
+const makeUrl = (p) => {
+  if (!p) return null;
+  if (/^https?:\/\//i.test(p)) return p; // absolute แล้ว
+  return new URL(p, API_BASE_URL).href;  // ต่อ base 4000 ให้
+};
+
 export default function AnalysisPage() {
   const [analysisData, setAnalysisData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -34,17 +45,19 @@ export default function AnalysisPage() {
         setAnalysisData(backendResponse);
 
         // ✅ Fix: Set up image URLs properly
-        const baseUrl =
-          process.env.NODE_ENV === "development"
-            ? "http://localhost:8000" // Your FastAPI backend URL
-            : window.location.origin;
+        // const baseUrl =
+        //   process.env.NODE_ENV === "development"
+        //     ? "http://localhost:8000" // Your FastAPI backend URL
+        //     : window.location.origin;
 
-        const originalImageUrl = backendResponse.originalImage
-          ? `${baseUrl}${backendResponse.originalImage}`
-          : null;
-        const croppedImageUrl = backendResponse.croppedImage
-          ? `${baseUrl}${backendResponse.croppedImage}`
-          : null;
+        // const originalImageUrl = backendResponse.originalImage
+        //   ? `${baseUrl}${backendResponse.originalImage}`
+        //   : null;
+        // const croppedImageUrl = backendResponse.croppedImage
+        //   ? `${baseUrl}${backendResponse.croppedImage}`
+        //   : null;
+        const originalImageUrl = makeUrl(backendResponse.originalImage);
+        const croppedImageUrl  = makeUrl(backendResponse.croppedImage);
 
         setImageUrls({
           original: originalImageUrl,
@@ -221,27 +234,34 @@ export default function AnalysisPage() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              {/* ✅ Fix: Use correct face detection status */}
-              {analysisData.faceDetection?.detected && (
-                <span className="px-3 py-1 rounded-full text-sm font-medium text-green-600 bg-green-100">
-                  Face Detected (
-                  {Math.round(
-                    (analysisData.faceDetection.confidence || 0) * 100
-                  )}
-                  %)
-                </span>
-              )}
-              <span
-                className={`px-3 py-1 rounded-full text-sm font-medium ${getSeverityColor(
-                  analysisData.recommendations?.severity || "mild"
-                )}`}
-              >
-                {analysisData.skinAnalysis?.overall_health?.health_category?.replace(
-                  /_/g,
-                  " "
-                ) || "Unknown"}
+            {/* ✅ Face Detected badge */}
+            {analysisData.faceDetection?.detected && (
+              <span className="px-3 py-1 rounded-full text-sm font-medium text-green-600 bg-green-100">
+                Face Detected (
+                {Math.round((analysisData.faceDetection.confidence || 0) * 100)}%)
               </span>
-            </div>
+            )}
+
+            {/* ✅ Gemini badge */}
+            {analysisData.geminiSuccess && (
+              <span className="px-3 py-1 rounded-full text-sm font-medium text-indigo-600 bg-indigo-100">
+                Gemini: {analysisData.geminiModel || '1.5-flash'}
+              </span>
+            )}
+
+            {/* ✅ Health category badge */}
+            <span
+              className={`px-3 py-1 rounded-full text-sm font-medium ${getSeverityColor(
+                analysisData.recommendations?.severity || 'mild'
+              )}`}
+            >
+              {analysisData.skinAnalysis?.overall_health?.health_category?.replace(
+                /_/g,
+                ' '
+              ) || 'Unknown'}
+            </span>
+          </div>
+
           </div>
         </div>
 

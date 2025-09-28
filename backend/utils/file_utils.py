@@ -7,14 +7,20 @@ from datetime import datetime
 from config.settings import settings
 from models.schemas import FaceDetectionInfo, SkinAnalysisResult
 import logging
+import ulid
 
 logger = logging.getLogger(__name__)
 
+# def generate_analysis_id() -> str:
+#     """Generate unique analysis ID"""
+#     timestamp = int(datetime.now().timestamp() * 1000)
+#     random_id = str(uuid.uuid4()).replace('-', '')[:12]
+#     return f"skinai-topic-{timestamp}-{random_id}"
+
+
 def generate_analysis_id() -> str:
-    """Generate unique analysis ID"""
-    timestamp = int(datetime.now().timestamp() * 1000)
-    random_id = str(uuid.uuid4()).replace('-', '')[:12]
-    return f"skinai-topic-{timestamp}-{random_id}"
+    return f"sk_{ulid.new().str.lower()}"  # ยาว ~ 26 ตัว, ตัวพิมพ์เล็ก
+
 
 def get_file_extension(filename: str) -> str:
     """Get file extension"""

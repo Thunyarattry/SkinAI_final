@@ -51,8 +51,10 @@ app.add_middleware(
 )
 
 # Create directories
-settings.UPLOAD_DIR.mkdir(exist_ok=True)
-settings.AI_MODELS_DIR.mkdir(exist_ok=True)
+# settings.UPLOAD_DIR.mkdir(exist_ok=True)
+# settings.AI_MODELS_DIR.mkdir(exist_ok=True)
+settings.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(settings.UPLOAD_DIR)), name="uploads")
 
 # Mount static files
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
