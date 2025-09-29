@@ -189,7 +189,7 @@ if __name__ == "__main__":
     import uvicorn
     
     host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", 5001))
+    port = int(os.getenv("PORT", 4000))
     debug = os.getenv("DEBUG", "True").lower() == "true"
     
     logger.info(f"🌐 Starting SkinAI Advanced Server on {host}:{port}")

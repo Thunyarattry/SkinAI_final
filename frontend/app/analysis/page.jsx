@@ -36,7 +36,7 @@ export default function AnalysisPage() {
         // ✅ Fix: Set up image URLs properly
         const baseUrl =
           process.env.NODE_ENV === "development"
-            ? "http://localhost:8000" // Your FastAPI backend URL
+            ? "http://localhost:4000" // Your FastAPI backend URL
             : window.location.origin;
 
         const originalImageUrl = backendResponse.originalImage

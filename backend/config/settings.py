@@ -40,7 +40,7 @@ class Settings:
     
     # Server settings
     HOST = os.getenv("HOST", "0.0.0.0")
-    PORT = int(os.getenv("PORT", 5001))
+    PORT = int(os.getenv("PORT", 4000))
     DEBUG = os.getenv("DEBUG", "True").lower() == "true"
 
 settings = Settings()
