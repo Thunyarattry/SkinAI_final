@@ -302,4 +302,3 @@ if __name__=="__main__":
     analyzer=SkinAnalyzer()
     result=analyzer.analyze_image(args.image)
     print(json.dumps(result,ensure_ascii=False,indent=2))
-
