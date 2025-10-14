@@ -302,3 +302,139 @@ if __name__=="__main__":
     analyzer=SkinAnalyzer()
     result=analyzer.analyze_image(args.image)
     print(json.dumps(result,ensure_ascii=False,indent=2))
+
+
+# import sys
+# import json
+# import cv2
+# import numpy as np
+# from pathlib import Path
+# import os
+
+# def detect_and_analyze(image_path):
+#     """ตรวจจับและวิเคราะห์แบบเร็วที่สุด"""
+#     try:
+#         # อ่านภาพ
+#         image = cv2.imread(image_path)
+#         if image is None:
+#             return {"success": False, "error": "Cannot read image"}
+        
+#         # ใช้ OpenCV Haar Cascade
+#         face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+#         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        
+#         # ตรวจจับใบหน้า
+#         faces = face_cascade.detectMultiScale(gray, 1.1, 4, minSize=(30, 30))
+        
+#         if len(faces) > 0:
+#             # ใช้ใบหน้าแรกที่พบ
+#             x, y, w, h = faces[0]
+#             face_region = image[y:y+h, x:x+w]
+            
+#             # วิเคราะห์พื้นฐาน
+#             gray_face = cv2.cvtColor(face_region, cv2.COLOR_BGR2GRAY)
+#             brightness = float(np.mean(gray_face))
+            
+#             # ตรวจหาปัญหาง่ายๆ
+#             issues = []
+#             counts = {}
+            
+#             # สิว (จุดแดง)
+#             hsv_face = cv2.cvtColor(face_region, cv2.COLOR_BGR2HSV)
+#             red_mask = cv2.inRange(hsv_face, (0, 50, 50), (10, 255, 255))
+#             red_pixels = np.sum(red_mask > 0)
+            
+#             if red_pixels > 50:
+#                 issues.append("acne")
+#                 counts["acne"] = int(red_pixels / 10)
+            
+#             # ความสว่าง
+#             if brightness < 80:
+#                 issues.append("dull_skin")
+#             elif brightness > 200:
+#                 issues.append("bright_skin")
+            
+#             # บันทึกภาพ crop
+#             cropped_path = None
+#             try:
+#                 cropped_filename = f"cropped_{Path(image_path).stem}.jpg"
+#                 cropped_path = Path(image_path).parent / cropped_filename
+#                 cv2.imwrite(str(cropped_path), face_region)
+#             except:
+#                 pass
+            
+#             return {
+#                 "success": True,
+#                 "face_detection": {
+#                     "detected": True,
+#                     "coordinates": {"x": int(x), "y": int(y), "width": int(w), "height": int(h)},
+#                     "confidence": 0.8,
+#                     "detection_method": "OpenCV",
+#                     "total_faces": len(faces),
+#                     "face_analysis": {
+#                         "brightness": brightness,
+#                         "face_size": {"width": int(w), "height": int(h)}
+#                     }
+#                 },
+#                 "detectedIssues": issues,
+#                 "detectionCounts": counts,
+#                 "total_detections": len(issues),
+#                 "detected_classes": len(set(issues)),
+#                 "analysis_method": "Simple OpenCV",
+#                 "overall_health": {
+#                     "health_score": max(50, 100 - len(issues) * 20),
+#                     "condition": "good" if len(issues) == 0 else "moderate"
+#                 },
+#                 "croppedImagePath": str(cropped_path) if cropped_path else None,
+#                 "opencv_analysis": {
+#                     "region_size": [int(h), int(w)],
+#                     "analysis_type": "face_region"
+#                 }
+#             }
+#         else:
+#             # ไม่พบใบหน้า - วิเคราะห์ภาพทั้งหมด
+#             gray_full = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+#             brightness = float(np.mean(gray_full))
+            
+#             issues = []
+#             if brightness < 100:
+#                 issues.append("low_light")
+            
+#             return {
+#                 "success": True,
+#                 "face_detection": {
+#                     "detected": False,
+#                     "message": "No face detected"
+#                 },
+#                 "detectedIssues": issues,
+#                 "detectionCounts": {},
+#                 "total_detections": len(issues),
+#                 "detected_classes": len(issues),
+#                 "analysis_method": "Full Image",
+#                 "overall_health": {
+#                     "health_score": 70,
+#                     "condition": "unknown"
+#                 },
+#                 "opencv_analysis": {
+#                     "region_size": list(image.shape[:2]),
+#                     "analysis_type": "full_image"
+#                 }
+#             }
+            
+#     except Exception as e:
+#         return {"success": False, "error": str(e)}
+
+# # Main
+# if __name__ == "__main__":
+#     if len(sys.argv) < 2:
+#         print(json.dumps({"success": False, "error": "No image path provided"}))
+#         sys.exit(1)
+    
+#     image_path = sys.argv[1]
+    
+#     if not os.path.exists(image_path):
+#         print(json.dumps({"success": False, "error": "Image file not found"}))
+#         sys.exit(1)
+    
+#     result = detect_and_analyze(image_path)
+#     print(json.dumps(result, ensure_ascii=False))
